@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { unstable_cache as unstableCache } from "next/cache";
 import { buildComplaintsURL, buildShootingsURL, fetchSocrata, toFloatingTimestamp, buildComplaintsURLCurrent, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
 
 export async function GET(req: NextRequest) {
@@ -33,31 +34,35 @@ export async function GET(req: NextRequest) {
 
   try {
     if (city === "sf") {
-      // SF categories from both modern and legacy APIs
-      const [modernRows, legacyRows] = await Promise.all([
-        // Modern API (2018-Present)
-        fetchSocrata<Array<{ label?: unknown; count?: unknown }>>(buildSFIncidentsURL({
-          where: [
-            `incident_year IN ('2018','2019','2020','2021','2022','2023','2024','2025')`,
-            `incident_category IS NOT NULL`
-          ],
-          select: ["incident_category as label", "count(1) as count"],
-          group: ["label"],
-          order: "count DESC",
-          limit: 1000,
-        }), 3600),
-        // Legacy API (2003-2018)
-        fetchSocrata<Array<{ label?: unknown; count?: unknown }>>(buildSFIncidentsLegacyURL({
-          where: [
-            `date_extract_y(date) >= 2003`,
-            `category IS NOT NULL`
-          ],
-          select: ["category as label", "count(1) as count"],
-          group: ["label"],
-          order: "count DESC",
-          limit: 1000,
-        }), 3600)
-      ]);
+      const compute = async () => {
+        // SF categories from both modern and legacy APIs
+        const [modernRows, legacyRows] = await Promise.all([
+          // Modern API (2018-Present)
+          fetchSocrata<Array<{ label?: unknown; count?: unknown }>>(buildSFIncidentsURL({
+            where: [
+              `incident_year IN ('2018','2019','2020','2021','2022','2023','2024','2025')`,
+              `incident_category IS NOT NULL`
+            ],
+            select: ["incident_category as label", "count(1) as count"],
+            group: ["label"],
+            order: "count DESC",
+            limit: 1000,
+          }), 3600),
+          // Legacy API (2003-2018)
+          fetchSocrata<Array<{ label?: unknown; count?: unknown }>>(buildSFIncidentsLegacyURL({
+            where: [
+              `date_extract_y(date) >= 2003`,
+              `category IS NOT NULL`
+            ],
+            select: ["category as label", "count(1) as count"],
+            group: ["label"],
+            order: "count DESC",
+            limit: 1000,
+          }), 3600)
+        ]);
+        return { modernRows, legacyRows };
+      };
+      const { modernRows, legacyRows } = await unstableCache(compute, ["crime-types:sf"], { revalidate: 3600, tags: ["crime-types:sf"] })();
       
       // Merge categories from both APIs with case-insensitive dedupe.
       // Prefer modern API label casing when both exist; normalize legacy-only labels to Title Case.
@@ -110,12 +115,16 @@ export async function GET(req: NextRequest) {
     }
 
     // NYC fallback
-    const [complaintsRowsH, complaintsRowsC, shootingsRowsH, shootingsRowsC] = await Promise.all([
-      fetchSocrata<Array<{ ofns_desc?: unknown; count?: unknown }>>(complaintsUrl, 3600),
-      fetchSocrata<Array<{ ofns_desc?: unknown; count?: unknown }>>(complaintsUrlCur, 3600),
-      fetchSocrata<Array<{ count?: unknown }>>(shootingsUrl, 3600),
-      fetchSocrata<Array<{ count?: unknown }>>(shootingsUrlCur, 3600),
-    ]);
+    const computeNYC = async () => {
+      const [complaintsRowsH, complaintsRowsC, shootingsRowsH, shootingsRowsC] = await Promise.all([
+        fetchSocrata<Array<{ ofns_desc?: unknown; count?: unknown }>>(complaintsUrl, 3600),
+        fetchSocrata<Array<{ ofns_desc?: unknown; count?: unknown }>>(complaintsUrlCur, 3600),
+        fetchSocrata<Array<{ count?: unknown }>>(shootingsUrl, 3600),
+        fetchSocrata<Array<{ count?: unknown }>>(shootingsUrlCur, 3600),
+      ]);
+      return { complaintsRowsH, complaintsRowsC, shootingsRowsH, shootingsRowsC };
+    };
+    const { complaintsRowsH, complaintsRowsC, shootingsRowsH, shootingsRowsC } = await unstableCache(computeNYC, ["crime-types:nyc"], { revalidate: 3600, tags: ["crime-types:nyc"] })();
     const complaintsRows = [...complaintsRowsH, ...complaintsRowsC];
     const shootingsRows = [...shootingsRowsH, ...shootingsRowsC];
 

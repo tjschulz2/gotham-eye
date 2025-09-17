@@ -70,6 +70,15 @@ declare global {
   var __rowsInflightShoot: Map<string, Promise<ShootingRow[]>>|undefined;
 }
 
+// Vercel Data Cache helper (available in server runtime)
+let nextCache: (<T>(cb: () => Promise<T>, keys?: string[], options?: { revalidate?: number; tags?: string[] }) => () => Promise<T>) | null = null;
+try {
+  // Lazy import to avoid bundling issues in non-server contexts
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const nc = require("next/cache");
+  nextCache = (nc && (nc.unstable_cache || nc.cache)) as typeof nextCache;
+} catch {}
+
 export function buildSoqlURL(options: FetchOptions, datasetUrl?: string): string {
   const params = new URLSearchParams();
   if (options.select && options.select.length > 0) {
@@ -161,7 +170,18 @@ export async function fetchSocrata<T = unknown>(url: string, revalidateSeconds?:
 
   const doFetch = (async () => {
     const t0 = performance.now ? performance.now() : Date.now();
-    const res = await fetch(url, { headers, cache: "no-store", next: { revalidate: 0 } });
+    // Use Vercel Data Cache when revalidateSeconds provided; otherwise opt out
+    let nextOptions: { revalidate: number; tags?: string[] } | undefined;
+    try {
+      if (typeof revalidateSeconds === "number" && revalidateSeconds > 0) {
+        const u = new URL(url);
+        const ds = u.pathname.split("/").pop() || "dataset";
+        const host = u.host.toLowerCase();
+        const tag = `socrata:${host}:${ds}`;
+        nextOptions = { revalidate: Math.max(1, Math.floor(revalidateSeconds)), tags: [tag] };
+      }
+    } catch {}
+    const res = await fetch(url, nextOptions ? { headers, next: nextOptions } : { headers, cache: "no-store", next: { revalidate: 0 } });
     const t1 = performance.now ? performance.now() : Date.now();
     try {
       const u = new URL(url);
@@ -381,14 +401,26 @@ export async function loadComplaintsRowsCombined(where: string[], ttlMs: number 
   }
   const t0 = Date.now();
   let hMs = 0, cMs = 0;
-  const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlH, 50000, 150000); hMs = Date.now()-s; try { console.log(`[rows][complaints][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
-  const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlC, 50000, 150000); cMs = Date.now()-s; try { console.log(`[rows][complaints][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
+  const revalidateSeconds = 3600; // Data Cache TTL for upstream pages and combined rows
+  const compute = async () => {
+    const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlH, 50000, 150000, revalidateSeconds); hMs = Date.now()-s; try { console.log(`[rows][complaints][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
+    const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlC, 50000, 150000, revalidateSeconds); cMs = Date.now()-s; try { console.log(`[rows][complaints][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
+    const [h, c] = await Promise.all([pH, pC]);
+    const rows = [...h, ...c];
+    const t1 = Date.now();
+    try { console.log(`[rows][complaints][done] total=${rows.length} ms=${t1 - t0} key=${key}`); } catch {}
+    return rows;
+  };
+  let run = compute;
+  try {
+    if (nextCache) {
+      const tag = `rows:complaints`;
+      run = nextCache<SocrataRow[]>(compute, [key], { revalidate: revalidateSeconds, tags: [tag] });
+    }
+  } catch {}
   const combinedPromise = (async () => {
     try {
-      const [h, c] = await Promise.all([pH, pC]);
-      const rows = [...h, ...c];
-      const t1 = Date.now();
-      try { console.log(`[rows][complaints][done] total=${rows.length} ms=${t1 - t0} key=${key}`); } catch {}
+      const rows = await run();
       cache.set(key, { expiresAt: now + ttlMs, data: rows });
       gcRowsCache();
       return rows;
@@ -438,14 +470,26 @@ export async function loadShootingsRowsCombined(where: string[], ttlMs: number =
   }
   const t0 = Date.now();
   let hMs = 0, cMs = 0;
-  const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<ShootingRow>(urlH, 20000, 80000); hMs = Date.now()-s; try { console.log(`[rows][shootings][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
-  const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<ShootingRow>(urlC, 20000, 80000); cMs = Date.now()-s; try { console.log(`[rows][shootings][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
+  const revalidateSeconds = 3600;
+  const compute = async () => {
+    const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<ShootingRow>(urlH, 20000, 80000, revalidateSeconds); hMs = Date.now()-s; try { console.log(`[rows][shootings][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
+    const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<ShootingRow>(urlC, 20000, 80000, revalidateSeconds); cMs = Date.now()-s; try { console.log(`[rows][shootings][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
+    const [h, c] = await Promise.all([pH, pC]);
+    const rows = [...h, ...c];
+    const t1 = Date.now();
+    try { console.log(`[rows][shootings][done] total=${rows.length} ms=${t1 - t0} key=${key}`); } catch {}
+    return rows as ShootingRow[];
+  };
+  let run = compute;
+  try {
+    if (nextCache) {
+      const tag = `rows:shootings`;
+      run = nextCache<ShootingRow[]>(compute, [key], { revalidate: revalidateSeconds, tags: [tag] });
+    }
+  } catch {}
   const combinedPromise = (async () => {
    try {
-      const [h, c] = await Promise.all([pH, pC]);
-      const rows = [...h, ...c];
-      const t1 = Date.now();
-      try { console.log(`[rows][shootings][done] total=${rows.length} ms=${t1 - t0} key=${key}`); } catch {}
+      const rows = await run();
       cache.set(key, { expiresAt: now + ttlMs, data: rows });
       gcRowsCache();
       return rows as ShootingRow[];

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { unstable_cache as unstableCache } from "next/cache";
 import { z } from "zod";
 import { buildComplaintsURL, buildShootingsURL, escapeSoqlString, fetchSocrata, toFloatingTimestamp, buildComplaintsURLCurrent, buildShootingsURLCurrent, mergeAggregateRows, loadComplaintsRowsCombined, loadShootingsRowsCombined, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
 import { buildViolentSoqlCondition, parseViolenceParam } from "@/lib/categories";
@@ -884,9 +885,17 @@ export async function GET(req: NextRequest) {
       fetchSocrata<any[]>(shootingMurdersByTypeURLCur, 30).catch(() => []),
     ]);
 
-    const [complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg] = await Promise.all([
-      pComplaints, pShootings, pComplaintsMonthly, pComplaintsMonthlyCur, pShootingsMonthly, pShootingsMonthlyCur, pOfns, pPrem, pBoro, pRace, pAge, pPairsRace, pPairsSex, pPairsBoth, pShootTotals,
-    ]);
+    const computePayload = async () => {
+      const [complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg] = await Promise.all([
+        pComplaints, pShootings, pComplaintsMonthly, pComplaintsMonthlyCur, pShootingsMonthly, pShootingsMonthlyCur, pOfns, pPrem, pBoro, pRace, pAge, pPairsRace, pPairsSex, pPairsBoth, pShootTotals,
+      ]);
+      return { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg };
+    };
+    const usePersistent = !hasPoly && !hasBBox; // Citywide
+    const statsKey = usePersistent ? [`stats|citywide|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`] : ["volatile"];
+    const { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg } = usePersistent
+      ? await unstableCache(computePayload, statsKey, { revalidate: 3600, tags: ["stats:citywide"] })()
+      : await computePayload();
     const tFetchEnd = Date.now();
     try {
       console.log(

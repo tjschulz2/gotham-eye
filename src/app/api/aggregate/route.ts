@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { unstable_cache as unstableCache } from "next/cache";
 import { z } from "zod";
 import { buildShootingsURL, escapeSoqlString, fetchSocrata, toFloatingTimestamp, ShootingRow, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL, loadComplaintsRowsCombined } from "@/lib/socrata";
 import { buildViolentSoqlCondition, parseViolenceParam } from "@/lib/categories";
@@ -247,7 +248,17 @@ export async function GET(req: NextRequest) {
       tasks.push(fetchSocrata<ShootingRow[]>(shootingsUrlCur + "&$limit=10000"));
     }
     
-    const settled = await Promise.allSettled(tasks);
+    const compute = async () => {
+      const settled = await Promise.allSettled(tasks);
+      return settled;
+    };
+    // Persist only citywide requests (no viewport bbox in query), but here we always have bbox.
+    // So instead, persist specific citywide bboxes used by warmup (explicit values below)
+    const nycCitywide = `${minLon},${minLat},${maxLon},${maxLat}` === "-74.25559,40.49612,-73.70001,40.91553";
+    const sfCitywide = `${minLon},${minLat},${maxLon},${maxLat}` === "-122.5149,37.7081,-122.357,37.8324" || `${minLon},${minLat},${maxLon},${maxLat}` === "-122.5149,37.7081,-122.3570,37.8324";
+    const persist = nycCitywide || sfCitywide;
+    const key = [`agg|${nycCitywide?"nyc":"sf"}|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`];
+    const settled = persist ? await unstableCache(compute, key, { revalidate: 900, tags: ["agg:citywide"] })() : await compute();
     const tFetchEnd = Date.now();
     try {
       console.log(
