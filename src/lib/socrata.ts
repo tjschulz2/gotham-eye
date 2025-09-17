@@ -395,7 +395,7 @@ export async function loadComplaintsRowsCombined(where: string[], ttlMs: number 
   }
   const t0 = Date.now();
   let hMs = 0, cMs = 0;
-  const revalidateSeconds = 3600; // Data Cache TTL for upstream pages and combined rows
+  const revalidateSeconds = 86400; // 24h Data Cache TTL for upstream pages and combined rows
   const compute = async () => {
     const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlH, 50000, 150000, revalidateSeconds); hMs = Date.now()-s; try { console.log(`[rows][complaints][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
     const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlC, 50000, 150000, revalidateSeconds); cMs = Date.now()-s; try { console.log(`[rows][complaints][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
@@ -462,7 +462,7 @@ export async function loadShootingsRowsCombined(where: string[], ttlMs: number =
   }
   const t0 = Date.now();
   let hMs = 0, cMs = 0;
-  const revalidateSeconds = 3600;
+  const revalidateSeconds = 86400;
   const compute = async () => {
     const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<ShootingRow>(urlH, 20000, 80000, revalidateSeconds); hMs = Date.now()-s; try { console.log(`[rows][shootings][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
     const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<ShootingRow>(urlC, 20000, 80000, revalidateSeconds); cMs = Date.now()-s; try { console.log(`[rows][shootings][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();

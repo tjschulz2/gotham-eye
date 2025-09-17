@@ -254,11 +254,12 @@ export async function GET(req: NextRequest) {
     };
     // Persist only citywide requests (no viewport bbox in query), but here we always have bbox.
     // So instead, persist specific citywide bboxes used by warmup (explicit values below)
-    const nycCitywide = `${minLon},${minLat},${maxLon},${maxLat}` === "-74.25559,40.49612,-73.70001,40.91553";
-    const sfCitywide = `${minLon},${minLat},${maxLon},${maxLat}` === "-122.5149,37.7081,-122.357,37.8324" || `${minLon},${minLat},${maxLon},${maxLat}` === "-122.5149,37.7081,-122.3570,37.8324";
+    const eq = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+    const nycCitywide = eq(minLon, -74.25559) && eq(minLat, 40.49612) && eq(maxLon, -73.70001) && eq(maxLat, 40.91553);
+    const sfCitywide = eq(minLon, -122.5149) && eq(minLat, 37.7081) && (eq(maxLon, -122.357) || eq(maxLon, -122.3570)) && eq(maxLat, 37.8324);
     const persist = nycCitywide || sfCitywide;
     const key = [`agg|${nycCitywide?"nyc":"sf"}|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`];
-    const settled = persist ? await unstableCache(compute, key, { revalidate: 900, tags: ["agg:citywide"] })() : await compute();
+    const settled = persist ? await unstableCache(compute, key, { revalidate: 86400, tags: ["agg:citywide"] })() : await compute();
     const tFetchEnd = Date.now();
     try {
       console.log(

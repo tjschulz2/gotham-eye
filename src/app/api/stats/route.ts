@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const includeUnknown = (parsed.data.includeUnknown || "0") === "1";
   // Parse bbox if provided (NYC format: lon,lat,lon,lat; SF sometimes lat,lon)
   let minLon: number | undefined, minLat: number | undefined, maxLon: number | undefined, maxLat: number | undefined;
-  const hasBBox = typeof bbox === 'string' && bbox.length > 0;
+  let hasBBox = typeof bbox === 'string' && bbox.length > 0;
   const hasPoly = typeof polyStr === 'string' && polyStr.length > 0;
   if (hasBBox) {
     const bboxParts = (bbox as string).split(",");
@@ -48,6 +48,14 @@ export async function GET(req: NextRequest) {
       maxLat = Number(maxLatStr);
     }
     if (![minLon, minLat, maxLon, maxLat].every((n) => Number.isFinite(n))) return new Response("Bad bbox", { status: 400 });
+    // Treat canonical citywide bboxes as citywide (so cached responses are used)
+    const eq = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+    const isNYCBBox = eq(minLon as number, -74.25559) && eq(minLat as number, 40.49612) && eq(maxLon as number, -73.70001) && eq(maxLat as number, 40.91553);
+    const isSFBBox = eq(minLon as number, -122.5149) && eq(minLat as number, 37.7081) && (eq(maxLon as number, -122.3570) || eq(maxLon as number, -122.357)) && eq(maxLat as number, 37.8324);
+    if (isNYCBBox || isSFBBox) {
+      // Downgrade to citywide mode: do not apply within_box and enable persistent caching
+      hasBBox = false;
+    }
   }
 
   // Parse optional polygon (GeoJSON Polygon/MultiPolygon)
@@ -895,7 +903,7 @@ export async function GET(req: NextRequest) {
     const usePersistent = !hasPoly && !hasBBox; // Citywide
     const statsKey = usePersistent ? [`stats|citywide|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`] : ["volatile"];
     const { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg, complaintsMs, shootingsMs } = usePersistent
-      ? await unstableCache(computePayload, statsKey, { revalidate: 3600, tags: ["stats:citywide"] })()
+      ? await unstableCache(computePayload, statsKey, { revalidate: 86400, tags: ["stats:citywide"] })()
       : await computePayload();
     const tFetchEnd = Date.now();
     try {
