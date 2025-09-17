@@ -19,7 +19,7 @@ export function featuresToTilePBF(
     indexMaxPoints: 0,
   });
   const tile = tileIndex.getTile(z, x, y);
-  type VTFeature = { type: number; geometry: unknown; tags?: unknown };
+  type VTFeature = { type: number; geometry: unknown; tags: unknown };
   const layers: Record<string, { features: VTFeature[] }> = {
     points: { features: [] },
   };
@@ -27,7 +27,7 @@ export function featuresToTilePBF(
     layers.points.features = (tile.features as Array<{ geometry: unknown; tags?: unknown }>).map((f) => ({
       type: 1,
       geometry: f.geometry,
-      tags: f.tags,
+      tags: f.tags ?? {},
     }));
   }
   // Emit Vector Tile Spec v2 to avoid Mapbox warnings and rendering quirks
