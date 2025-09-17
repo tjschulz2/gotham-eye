@@ -974,6 +974,14 @@ export default function Home() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+  // Default filters closed on mobile only
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && window.innerWidth <= 768) {
+        setFiltersOpen(false);
+      }
+    } catch {}
+  }, []);
   
   // Detect map loading start events
   useEffect(() => {
