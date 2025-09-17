@@ -1,3 +1,4 @@
+import { unstable_cache as unstableCache } from "next/cache";
 // Lightweight Socrata client helpers for NYC Open Data (NYPD Complaints & Shootings)
 // and SF Open Data (SFPD Incident Reports). Avoids heavy deps; builds simple SoQL URLs
 // with safe parameterization.
@@ -70,14 +71,7 @@ declare global {
   var __rowsInflightShoot: Map<string, Promise<ShootingRow[]>>|undefined;
 }
 
-// Vercel Data Cache helper (available in server runtime)
-let nextCache: (<T>(cb: () => Promise<T>, keys?: string[], options?: { revalidate?: number; tags?: string[] }) => () => Promise<T>) | null = null;
-try {
-  // Lazy import to avoid bundling issues in non-server contexts
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const nc = require("next/cache");
-  nextCache = (nc && (nc.unstable_cache || nc.cache)) as typeof nextCache;
-} catch {}
+// Vercel Data Cache helper is imported via ESM as unstableCache
 
 export function buildSoqlURL(options: FetchOptions, datasetUrl?: string): string {
   const params = new URLSearchParams();
@@ -413,10 +407,8 @@ export async function loadComplaintsRowsCombined(where: string[], ttlMs: number 
   };
   let run = compute;
   try {
-    if (nextCache) {
-      const tag = `rows:complaints`;
-      run = nextCache<SocrataRow[]>(compute, [key], { revalidate: revalidateSeconds, tags: [tag] });
-    }
+    const tag = `rows:complaints`;
+    run = unstableCache(compute, [key], { revalidate: revalidateSeconds, tags: [tag] });
   } catch {}
   const combinedPromise = (async () => {
     try {
@@ -482,10 +474,8 @@ export async function loadShootingsRowsCombined(where: string[], ttlMs: number =
   };
   let run = compute;
   try {
-    if (nextCache) {
-      const tag = `rows:shootings`;
-      run = nextCache<ShootingRow[]>(compute, [key], { revalidate: revalidateSeconds, tags: [tag] });
-    }
+    const tag = `rows:shootings`;
+    run = unstableCache(compute, [key], { revalidate: revalidateSeconds, tags: [tag] });
   } catch {}
   const combinedPromise = (async () => {
    try {
