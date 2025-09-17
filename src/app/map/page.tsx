@@ -2412,7 +2412,7 @@ export default function Home() {
                   }}
                 >
                   <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <label style={{ fontSize: 13, fontWeight: 600 }}>Years</label>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>Years</label>
                     <button
                       type="button"
                       onClick={(e) => { e.preventDefault(); setVclass([]); setSelectedOfns([]); setStats(null); setAggData(null); setLegendRange(null); setFiltersVersion((v)=>v+1); try { if (mapRef && typeof mapRef.setPaintProperty === 'function') { mapRef.setPaintProperty('neighborhood-boundaries', 'fill-color', '#6b7280'); mapRef.setPaintProperty('neighborhood-boundaries', 'fill-opacity', 0.16); mapRef.setPaintProperty('neighborhood-boundaries', 'fill-outline-color', '#A3A3A3'); } } catch {} }}
@@ -2474,7 +2474,7 @@ export default function Home() {
                   {/* Violent section */}
                   <div style={{ marginTop: 14, borderTop: "1px solid #333", paddingTop: 12 }}>
                     <div style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>Violent crimes</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1, color: "#fff" }}>Violent crimes</div>
                       <input type="checkbox" checked={violentOn} onChange={() => toggleCategory("violent")} />
                     </div>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, opacity: violentOn ? 1 : 0.9 }}>
@@ -2493,7 +2493,7 @@ export default function Home() {
                   {/* Non-violent section */}
                   <div style={{ marginTop: 20, borderTop: "1px solid #333", paddingTop: 12 }}>
                     <div style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>Non-violent crimes</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1, color: "#fff" }}>Non-violent crimes</div>
                       <input type="checkbox" checked={nonviolentOn} onChange={() => toggleCategory("nonviolent")} />
                     </div>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, opacity: nonviolentOn ? 1 : 0.9 }}>
@@ -2565,7 +2565,7 @@ export default function Home() {
                 >
                   {/* Years header + Clear all */}
                   <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <label style={{ fontSize: 13, fontWeight: 600 }}>Years</label>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>Years</label>
                     <button
                       type="button"
                       onClick={(e) => { e.preventDefault(); setVclass([]); setSelectedOfns([]); setStats(null); setAggData(null); setLegendRange(null); setFiltersVersion((v)=>v+1); try { if (mapRef && typeof mapRef.setPaintProperty === 'function') { mapRef.setPaintProperty('neighborhood-boundaries', 'fill-color', '#6b7280'); mapRef.setPaintProperty('neighborhood-boundaries', 'fill-opacity', 0.16); mapRef.setPaintProperty('neighborhood-boundaries', 'fill-outline-color', '#A3A3A3'); } } catch {} }}
@@ -2627,7 +2627,7 @@ export default function Home() {
                   {/* Violent section */}
                   <div style={{ marginTop: 14, borderTop: "1px solid #333", paddingTop: 12 }}>
                     <div style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>Violent crimes</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1, color: "#fff" }}>Violent crimes</div>
                       <input type="checkbox" checked={violentOn} onChange={() => toggleCategory("violent")} />
                     </div>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, opacity: violentOn ? 1 : 0.9 }}>
@@ -2646,7 +2646,7 @@ export default function Home() {
                   {/* Non-violent section */}
                   <div style={{ marginTop: 20, borderTop: "1px solid #333", paddingTop: 12 }}>
                     <div style={{ display: "flex", alignItems: "center" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>Non-violent crimes</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, flex: 1, color: "#fff" }}>Non-violent crimes</div>
                       <input type="checkbox" checked={nonviolentOn} onChange={() => toggleCategory("nonviolent")} />
                     </div>
                     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, opacity: nonviolentOn ? 1 : 0.9 }}>
