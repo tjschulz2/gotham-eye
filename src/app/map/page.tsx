@@ -2991,7 +2991,7 @@ export default function Home() {
                           <button
                             key={opt.key}
                             onClick={() => onChangePairsMode(opt.key)}
-                            style={{ fontSize: 12, padding: "4px 8px", borderRadius: 12, border: "1px solid #666", background: active ? "#334155" : "#111", color: "#fff", cursor: "pointer" }}
+                            style={{ fontSize: 12, padding: "4px 8px", borderRadius: 12, border: "1px solid #666", background: active ? "#3A3A3A" : "#4D4D4D", color: "#fff", cursor: "pointer" }}
                           >
                             {opt.label}
                           </button>
