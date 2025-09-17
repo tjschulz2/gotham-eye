@@ -138,7 +138,7 @@ export async function GET(req: NextRequest) {
         let offset = 0;
         const chunk = 50000;
         while (true) {
-          const page = await fetchSocrata<any[]>(`${modernURL}&$limit=${chunk}&$offset=${offset}`, 5);
+          const page = await fetchSocrata<any[]>(`${modernURL}&$limit=${chunk}&$offset=${offset}`, 3600);
           if (!page || page.length === 0) break;
           for (const r of page) {
             const lat = Number((r as any).latitude);
@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
         let offset = 0;
         const chunk = 50000;
         while (true) {
-          const page = await fetchSocrata<any[]>(`${legacyURL}&$limit=${chunk}&$offset=${offset}`, 5);
+          const page = await fetchSocrata<any[]>(`${legacyURL}&$limit=${chunk}&$offset=${offset}`, 3600);
           if (!page || page.length === 0) break;
           for (const r of page) {
             const lat = Number((r as any).y);

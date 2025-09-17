@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
           
           while (true) {
             const chunkURL = legacyURL + `&$limit=${chunkSize}&$offset=${offset}`;
-            const chunkRows = await fetchSocrata<any[]>(chunkURL, 5); // Shorter cache for responsiveness
+          const chunkRows = await fetchSocrata<any[]>(chunkURL, 3600);
             
             if (!chunkRows || chunkRows.length === 0) break;
             
@@ -201,7 +201,7 @@ export async function GET(req: NextRequest) {
           
           while (true) {
             const chunkURL = modernURL + `&$limit=${chunkSize}&$offset=${offset}`;
-            const chunkRows = await fetchSocrata<any[]>(chunkURL, 5); // Shorter cache for responsiveness
+            const chunkRows = await fetchSocrata<any[]>(chunkURL, 3600);
             
             if (!chunkRows || chunkRows.length === 0) break;
             
