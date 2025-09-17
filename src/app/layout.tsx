@@ -6,13 +6,13 @@ const siteUrl = "https://gothameye.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "Gotham Eye | The World's Best Open Crime Map and Data",
+  title: "Gotham Eye | Find out if your neighborhood is safe from crime",
   description:
-    "Explore detailed crime statistics and patterns with Gotham Eye's interactive map. The world's most comprehensive open crime data visualization platform.",
+    "The ultimate crime map for discovering if your neighborhood is safe from crime. Keep cities safe and hold politicians accountable by contributing more data.",
   openGraph: {
-    title: "Gotham Eye | The World's Best Open Crime Map and Data",
+    title: "Gotham Eye | Find out if your neighborhood is safe from crime",
     description:
-      "Explore detailed crime statistics and patterns with Gotham Eye's interactive map. The world's most comprehensive open crime data visualization platform.",
+      "The ultimate crime map for discovering if your neighborhood is safe from crime. Keep cities safe and hold politicians accountable by contributing more data.",
     url: siteUrl,
     siteName: "Gotham Eye",
     images: [
@@ -28,9 +28,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Gotham Eye | The World's Best Open Crime Map and Data",
+    title: "Gotham Eye | Find out if your neighborhood is safe from crime",
     description:
-      "Explore detailed crime statistics and patterns with Gotham Eye's interactive map. The world's most comprehensive open crime data visualization platform.",
+      "The ultimate crime map for discovering if your neighborhood is safe from crime. Keep cities safe and hold politicians accountable by contributing more data.",
     images: [`${siteUrl}/imessageBanner.png?v=2`],
   },
 };
