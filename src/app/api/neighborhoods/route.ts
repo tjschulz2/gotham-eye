@@ -1,16 +1,17 @@
 import { NextRequest } from "next/server";
+import type { FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 
 // Simple in-memory cache to avoid hammering upstream for identical requests
-type CacheEntry = { expiresAt: number; data: any };
+type CacheEntry = { expiresAt: number; data: FeatureCollection<Geometry, GeoJsonProperties> };
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 
+declare global { var __neighborhoodsCache: Map<string, CacheEntry> | undefined }
 function getCache(): Map<string, CacheEntry> {
-  const g = globalThis as any;
-  if (!g.__neighborhoodsCache) g.__neighborhoodsCache = new Map<string, CacheEntry>();
-  return g.__neighborhoodsCache as Map<string, CacheEntry>;
+  if (!globalThis.__neighborhoodsCache) globalThis.__neighborhoodsCache = new Map<string, CacheEntry>();
+  return globalThis.__neighborhoodsCache as Map<string, CacheEntry>;
 }
 
-async function fetchJson(url: string): Promise<any> {
+async function fetchJson(url: string): Promise<FeatureCollection<Geometry, GeoJsonProperties>> {
   const headers: Record<string, string> = { Accept: "application/json" };
   try {
     const host = new URL(url).host.toLowerCase();
@@ -27,12 +28,12 @@ async function fetchJson(url: string): Promise<any> {
   return res.json();
 }
 
-async function loadNYCNeighborhoods(): Promise<any> {
+async function loadNYCNeighborhoods(): Promise<FeatureCollection<Geometry, GeoJsonProperties>> {
   // NYC NTA (Neighborhood Tabulation Areas) — GeoJSON endpoint
   const candidates = [
     "https://data.cityofnewyork.us/resource/cpf4-rkhq.geojson?$limit=50000",
   ];
-  let lastErr: any = null;
+  let lastErr: unknown = null;
   for (const url of candidates) {
     try {
       const json = await fetchJson(url);
@@ -43,7 +44,7 @@ async function loadNYCNeighborhoods(): Promise<any> {
       lastErr = e;
     }
   }
-  throw lastErr || new Error("Failed to load NYC neighborhoods");
+  throw (lastErr instanceof Error ? lastErr : new Error("Failed to load NYC neighborhoods"));
 }
 
 export async function GET(req: NextRequest) {
@@ -60,14 +61,14 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    let data: any;
+    let data: FeatureCollection<Geometry, GeoJsonProperties>;
     switch (city) {
       case "nyc":
         data = await loadNYCNeighborhoods();
         break;
       default:
         // For unsupported cities, return an empty FeatureCollection
-        data = { type: "FeatureCollection", features: [] };
+        data = { type: "FeatureCollection", features: [] } as FeatureCollection<Geometry, GeoJsonProperties>;
         break;
     }
 
@@ -75,9 +76,9 @@ export async function GET(req: NextRequest) {
     return Response.json(data, {
       headers: { "Cache-Control": "public, s-maxage=3600" },
     });
-  } catch (e: any) {
-    console.error("/api/neighborhoods error:", e?.message || e);
-    return new Response("Neighborhoods error: " + (e?.message || String(e)), { status: 500 });
+  } catch (e: unknown) {
+    console.error("/api/neighborhoods error:", e instanceof Error ? e.message : e);
+    return new Response("Neighborhoods error: " + (e instanceof Error ? e.message : String(e)), { status: 500 });
   }
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { buildComplaintsURL, buildShootingsURL, escapeSoqlString, fetchSocrata, fetchSocrataAll, toFloatingTimestamp, ShootingRow, buildComplaintsURLCurrent, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL, loadComplaintsRowsCombined, loadShootingsRowsCombined } from "@/lib/socrata";
+import { buildShootingsURL, escapeSoqlString, fetchSocrata, toFloatingTimestamp, ShootingRow, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL, loadComplaintsRowsCombined } from "@/lib/socrata";
 import { buildViolentSoqlCondition, parseViolenceParam } from "@/lib/categories";
 import * as h3 from "h3-js";
 

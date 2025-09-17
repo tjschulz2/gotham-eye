@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { buildComplaintsURL, buildShootingsURL, fetchSocrata, buildComplaintsURLCurrent, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   try {
     const complaintsUrl = buildComplaintsURL({
       select: ["min(cmplnt_fr_dt) as min_dt", "max(cmplnt_fr_dt) as max_dt"],
@@ -53,8 +53,7 @@ export async function GET(_req: NextRequest) {
 
     return Response.json({ minYear, maxYear }, { headers: { "Cache-Control": "public, s-maxage=86400" } });
   } catch (e: any) {
-    console.error("/api/year-range error:", e);
-    return new Response("Year range error: " + e?.message, { status: 500 });
+    return new Response("Failed to load year range: " + (e?.message || String(e)), { status: 500 });
   }
 }
 

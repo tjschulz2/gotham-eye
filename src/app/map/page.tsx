@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Map as MapLibreMap, MapLayerMouseEvent, MapMouseEvent, MapGeoJSONFeature, GeoJSONSource } from "maplibre-gl";
+import type { FeatureCollection as GJFeatureCollection, Geometry, GeoJsonProperties } from "geojson";
 import { isViolentOfnsDesc } from "@/lib/categories";
 
 type CrimeType = { label: string; count: number };
 
 // Rotating loading text with fade/slide transitions
-type RotatingLoadingTextProps = { messages: string[]; intervalMs?: number; className?: string; staticMessage?: string; resetKey?: any };
+type RotatingLoadingTextProps = { messages: string[]; intervalMs?: number; className?: string; staticMessage?: string; resetKey?: unknown };
 function RotatingLoadingText({ messages, intervalMs = 7000, className, staticMessage, resetKey }: RotatingLoadingTextProps) {
   const [index, setIndex] = useState(0);
   const [phase, setPhase] = useState<'in' | 'out'>('in');
@@ -60,9 +62,21 @@ function fourYearsAgoISO(): string {
   return d.toISOString();
 }
 
+const asErrorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+const isGeoJSONSource = (src: unknown): src is GeoJSONSource => {
+  return !!src && (src as { type?: unknown; setData?: unknown }).type === 'geojson' && typeof (src as { setData?: unknown }).setData === 'function';
+};
+
 // Add neighborhood boundaries and interactivity
 type NeighborhoodFilters = { startISO?: string; endISO?: string; vclass?: string[]; ofns?: string[]; includeUnknown?: boolean };
-async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?: (name: string | null, feature: any | null) => void, filters?: NeighborhoodFilters, onShimmerChange?: (loading: boolean) => void) {
+async function addNeighborhoodBoundaries(
+  map: MapLibreMap,
+  city: "nyc" | "sf",
+  onSelect?: (name: string | null, feature: MapGeoJSONFeature | null) => void,
+  filters?: NeighborhoodFilters,
+  onShimmerChange?: (loading: boolean) => void
+) {
   if (!map || typeof map.getStyle !== 'function') {
     console.warn('[map] addNeighborhoodBoundaries called before map is ready');
     return;
@@ -92,6 +106,13 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
   const neighborhoodSelectedId = `${neighborhoodLayerId}-selected`;
   const neighborhoodLabelsSourceId = `${neighborhoodLabelsId}-src`;
 
+  type MapAugments = {
+    __neighborhoodShimmerTimer?: number;
+    __neighborhoodLayerClickHandler?: (e: MapLayerMouseEvent) => void;
+    __neighborhoodClearHandler?: (e: MapMouseEvent) => void;
+  };
+  const aug = map as MapLibreMap & MapAugments;
+
   // Remove existing neighborhood layers if they exist (including shimmer layers) in safe order
   try {
     console.log(`[map] 🧹 Cleaning up existing layers...`);
@@ -101,7 +122,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
     }
     try { if (map.getLayer(neighborhoodLabelsSelectedId)) { map.removeLayer(neighborhoodLabelsSelectedId); console.log(`[map] ✅ Removed existing selected labels layer`); } } catch {}
     // Remove shimmer layers first to free the source
-    try { if ((map as any).__neighborhoodShimmerTimer) { clearInterval((map as any).__neighborhoodShimmerTimer); (map as any).__neighborhoodShimmerTimer = null; } } catch {}
+    try { if (aug.__neighborhoodShimmerTimer) { clearInterval(aug.__neighborhoodShimmerTimer); aug.__neighborhoodShimmerTimer = undefined; } } catch {}
     for (let k = 0; k < 6; k++) { // attempt a few indices defensively
       const sid = `${neighborhoodLayerId}-shimmer-${k}`;
       try { if (map.getLayer(sid)) { map.removeLayer(sid); console.log(`[map] ✅ Removed shimmer layer ${sid}`); } } catch {}
@@ -128,9 +149,9 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
       console.log(`[map] 📦 Loading NYC NTA GeoJSON from /public…`);
       const resLocal = await fetch(`/nyc_nta_2020.geojson`, { cache: "force-cache" });
       if (!resLocal.ok) throw new Error(`geojson_load_${resLocal.status}`);
-      const data: any = await resLocal.json();
+      const data = await resLocal.json() as GJFeatureCollection<Geometry, GeoJsonProperties>;
 
-      const guessLabelField = (props: any): string => {
+      const guessLabelField = (props: Record<string, unknown> | null | undefined): string => {
         if (!props || typeof props !== "object") return "name";
         const keys = Object.keys(props).map((k) => k.toLowerCase());
         const candidates = ["ntaname", "nta_name", "name", "neighborhood", "label", "ntaname2020", "ntaname_2020"];
@@ -153,9 +174,9 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
           ...(f || {}),
           properties: { ...(f?.properties || {}), __band: i % 3 },
         })),
-      } as any;
+      } as GJFeatureCollection<Geometry, GeoJsonProperties>;
       const existingSrcNYC = map.getSource(neighborhoodSourceId);
-      if (existingSrcNYC && typeof existingSrcNYC.setData === "function") {
+      if (isGeoJSONSource(existingSrcNYC)) {
         try { existingSrcNYC.setData(withBandsNYC); } catch {}
       } else {
         try { if (existingSrcNYC) map.removeSource(neighborhoodSourceId); } catch {}
@@ -207,7 +228,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
         const lineFc = toLines(data);
         try { if (map.getLayer(neighborhoodOutlineId)) map.removeLayer(neighborhoodOutlineId); } catch {}
         const existingOutlineSrc = map.getSource(neighborhoodOutlineSourceId);
-        if (existingOutlineSrc && typeof existingOutlineSrc.setData === 'function') {
+        if (isGeoJSONSource(existingOutlineSrc)) {
           try { existingOutlineSrc.setData(lineFc); } catch {}
         } else {
           try { if (existingOutlineSrc) map.removeSource(neighborhoodOutlineSourceId); } catch {}
@@ -219,7 +240,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
 
       // Ensure boundaries render above any subsequent layers (labels moved after creation below)
       try { map.moveLayer(neighborhoodOutlineId); } catch {}
-      try { map.moveLayer(neighborhoodLayerId); console.log('[map] moved neighborhood layers to top'); } catch (e) { try { console.log('[map] moveLayer failed (neighborhoods):', (e as any)?.message || e); } catch {} }
+      try { map.moveLayer(neighborhoodLayerId); console.log('[map] moved neighborhood layers to top'); } catch (e) { try { console.log('[map] moveLayer failed (neighborhoods):', asErrorMessage(e)); } catch {} }
 
       // If nothing renders, inspect and optionally fit to bounds once
       try {
@@ -339,7 +360,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
         } else {
           // No data mode: ensure plain grey neighborhoods and no shimmer
           try { onShimmerChange && onShimmerChange(false); } catch {}
-          try { if ((map as any).__neighborhoodShimmerTimer) { clearInterval((map as any).__neighborhoodShimmerTimer); (map as any).__neighborhoodShimmerTimer = null; } } catch {}
+          try { if (aug.__neighborhoodShimmerTimer) { clearInterval(aug.__neighborhoodShimmerTimer); aug.__neighborhoodShimmerTimer = undefined; } } catch {}
           try { for (let k = 0; k < 3; k++) { const id = `${neighborhoodLayerId}-shimmer-${k}`; if (map.getLayer(id)) map.removeLayer(id); } } catch {}
           try { map.setPaintProperty(neighborhoodLayerId, 'fill-color', '#6b7280'); } catch {}
           try { map.setPaintProperty(neighborhoodLayerId, 'fill-opacity', 0.16); } catch {}
@@ -348,7 +369,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
 
         const labelFc = makeCentroids(base);
         const existingLblSrc = map.getSource(neighborhoodLabelsSourceId);
-        if (existingLblSrc && typeof existingLblSrc.setData === 'function') {
+        if (isGeoJSONSource(existingLblSrc)) {
           try { existingLblSrc.setData(labelFc); } catch {}
         } else {
           try { if (existingLblSrc) map.removeSource(neighborhoodLabelsSourceId); } catch {}
@@ -357,11 +378,11 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
         // Update fill source data to the enriched version so counts are in properties
         try {
           const src = map.getSource(neighborhoodSourceId);
-          if (src && typeof src.setData === 'function') src.setData(base);
+          if (isGeoJSONSource(src)) src.setData(base);
         } catch {}
         // Stop shimmer and switch to percentile ramp only if we fetched density
         if (shouldFetchDensity) {
-          try { if ((map as any).__neighborhoodShimmerTimer) { clearInterval((map as any).__neighborhoodShimmerTimer); (map as any).__neighborhoodShimmerTimer = null; } } catch {}
+          try { if (aug.__neighborhoodShimmerTimer) { clearInterval(aug.__neighborhoodShimmerTimer); aug.__neighborhoodShimmerTimer = undefined; } } catch {}
           try { for (let k = 0; k < 3; k++) { const id = `${neighborhoodLayerId}-shimmer-${k}`; if (map.getLayer(id)) map.removeLayer(id); } } catch {}
           try { onShimmerChange && onShimmerChange(false); } catch {}
           try {
@@ -417,7 +438,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
               "text-opacity": 0.6,
             }
           });
-          try { map.moveLayer(neighborhoodLabelsId); console.log('[map] moved neighborhood labels to top'); } catch (e) { try { console.log('[map] moveLayer failed (labels):', (e as any)?.message || e); } catch {} }
+          try { map.moveLayer(neighborhoodLabelsId); console.log('[map] moved neighborhood labels to top'); } catch (e) { try { console.log('[map] moveLayer failed (labels):', asErrorMessage(e)); } catch {} }
         } catch {}
       }
 
@@ -570,7 +591,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
         })),
       } as any;
       const existingSrcSF = map.getSource(neighborhoodSourceId);
-      if (existingSrcSF && typeof existingSrcSF.setData === "function") {
+      if (isGeoJSONSource(existingSrcSF)) {
         try { existingSrcSF.setData(withBandsSF); } catch {}
       } else {
         try { if (existingSrcSF) map.removeSource(neighborhoodSourceId); } catch {}
@@ -620,7 +641,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
         const lineFc = toLines(data);
         try { if (map.getLayer(neighborhoodOutlineId)) map.removeLayer(neighborhoodOutlineId); } catch {}
         const existingOutlineSrc = map.getSource(neighborhoodOutlineSourceId);
-        if (existingOutlineSrc && typeof existingOutlineSrc.setData === 'function') {
+        if (isGeoJSONSource(existingOutlineSrc)) {
           try { existingOutlineSrc.setData(lineFc); } catch {}
         } else {
           try { if (existingOutlineSrc) map.removeSource(neighborhoodOutlineSourceId); } catch {}
@@ -721,7 +742,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
 
         const labelFc = makeCentroids(base);
         const existingLblSrc = map.getSource(neighborhoodLabelsSourceId);
-        if (existingLblSrc && typeof existingLblSrc.setData === 'function') {
+        if (isGeoJSONSource(existingLblSrc)) {
           try { existingLblSrc.setData(labelFc); } catch {}
         } else {
           try { if (existingLblSrc) map.removeSource(neighborhoodLabelsSourceId); } catch {}
@@ -729,7 +750,7 @@ async function addNeighborhoodBoundaries(map: any, city: "nyc" | "sf", onSelect?
         }
         try {
           const src = map.getSource(neighborhoodSourceId);
-          if (src && typeof src.setData === 'function') src.setData(base);
+          if (isGeoJSONSource(src)) src.setData(base);
         } catch {}
         // Stop shimmer and switch to ramp only if we fetched density
         if (shouldFetchDensity) {
@@ -1744,20 +1765,19 @@ export default function Home() {
   const toggleCategory = (key: "violent" | "nonviolent") => {
     setVclass((prev) => {
       const on = prev.includes(key);
-      let next = on ? prev.filter((v) => v !== key) : [...prev, key];
+      const next = on ? prev.filter((v) => v !== key) : [...prev, key];
       setSelectedOfns((sel) => {
         const allInCat = (key === "violent" ? violentOfns : nonviolentOfns);
-        const set = new Set(sel);
-        if (on) {
-          allInCat.forEach((l) => set.delete(l));
-          return Array.from(set);
-        } else {
-          if (sel.length > 0) {
-            allInCat.forEach((l) => set.add(l));
-            return Array.from(set);
-          }
+        if (!on) {
           return sel;
         }
+        const stillOn = next.includes(key);
+        if (stillOn) return sel;
+        const otherCatOn = next.includes(key === "violent" ? "nonviolent" : "violent");
+        if (otherCatOn) {
+          return sel.filter((l) => !allInCat.includes(l));
+        }
+        return [];
       });
       return next;
     });
@@ -3246,3 +3266,4 @@ function updateAggChoropleth(map: any, aggFcParam?: any, legendRangeParam?: { mi
     } catch {}
   } catch {}
 }
+

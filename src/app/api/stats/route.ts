@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { buildComplaintsURL, buildShootingsURL, escapeSoqlString, fetchSocrata, fetchSocrataAll, toFloatingTimestamp, ShootingRow, buildComplaintsURLCurrent, buildShootingsURLCurrent, mergeAggregateRows, loadComplaintsRowsCombined, loadShootingsRowsCombined, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
+import { buildComplaintsURL, buildShootingsURL, escapeSoqlString, fetchSocrata, toFloatingTimestamp, buildComplaintsURLCurrent, buildShootingsURLCurrent, mergeAggregateRows, loadComplaintsRowsCombined, loadShootingsRowsCombined, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
 import { buildViolentSoqlCondition, parseViolenceParam } from "@/lib/categories";
 import fs from "fs/promises";
 import path from "path";
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
       
       console.log(`[SF] Requested range: ${startYear}-${endYear}`);
       
-      let allRows: any[] = [];
+      const allRows: Array<Record<string, unknown>> = [];
       
       // Determine which APIs to use based on year range
       const needsLegacy = startYear <= 2017; // 2003-2018 API for years <= 2017
@@ -225,7 +225,7 @@ export async function GET(req: NextRequest) {
       
       // Process all stats from the combined result set
       // Neighborhood polygons (for "Where incidents occur" by lat/lon, not dataset column)
-      let sfPolyInfos: { label: string; rings: number[][][]; bbox: [number, number, number, number] }[] = [];
+      const sfPolyInfos: { label: string; rings: number[][][]; bbox: [number, number, number, number] }[] = [];
       try {
         const fcPath = path.join(process.cwd(), "public", "sf_nta_2025.geojson");
         const raw = await fs.readFile(fcPath, "utf8");
@@ -486,42 +486,8 @@ export async function GET(req: NextRequest) {
 
   // Build URLs for complaints data (historic and YTD)
   const tBuildStart = Date.now();
-  // NOTE: we intentionally rely only on row-level pulls below and aggregate in app to avoid redundant Socrata queries.
+  // NOTE: we rely on loaders and targeted group queries below; avoid redundant row URL variables.
   // Raw rows for deduped totals and ofns (align with map points)
-  const complaintsRowsURL = buildComplaintsURL({ where, select: [
-    "cmplnt_num",
-    "ofns_desc",
-    "law_cat_cd",
-    "boro_nm",
-    "prem_typ_desc",
-    "susp_race",
-    "susp_age_group",
-    "susp_sex",
-    "vic_race",
-    "vic_age_group",
-    "vic_sex",
-    "cmplnt_fr_dt",
-    "lat_lon",
-    "latitude",
-    "longitude"
-  ], order: "cmplnt_fr_dt DESC", limit: 50000 });
-  const complaintsRowsURLCur = buildComplaintsURLCurrent({ where, select: [
-    "cmplnt_num",
-    "ofns_desc",
-    "law_cat_cd",
-    "boro_nm",
-    "prem_typ_desc",
-    "susp_race",
-    "susp_age_group",
-    "susp_sex",
-    "vic_race",
-    "vic_age_group",
-    "vic_sex",
-    "cmplnt_fr_dt",
-    "lat_lon",
-    "latitude",
-    "longitude"
-  ], order: "cmplnt_fr_dt DESC", limit: 50000 });
   // Demographics (suspect-focused)
   const complaintByOfnsURL = buildComplaintsURL({ where, select: ["coalesce(ofns_desc, 'UNKNOWN') as label", "count(1) as count"], group: ["label"], order: "count DESC", limit: 5000 });
   const complaintByOfnsURLCur = buildComplaintsURLCurrent({ where, select: ["coalesce(ofns_desc, 'UNKNOWN') as label", "count(1) as count"], group: ["label"], order: "count DESC", limit: 5000 });
@@ -731,38 +697,6 @@ export async function GET(req: NextRequest) {
   const shootingByPremURLCur = buildShootingsURLCurrent({ where: shootingWhere, select: ["coalesce(location_desc, 'UNKNOWN') as label", "count(1) as count"], group: ["label"], order: "count DESC", limit: 1000 });
   // Borough already defined above for shootings
   // Raw rows for deduped totals and ofns (align with map points)
-  const shootingRowsURL = buildShootingsURL({ where: shootingWhere, select: [
-    "incident_key",
-    "statistical_murder_flag",
-    "occur_date",
-    "boro",
-    "location_desc",
-    "perp_race",
-    "perp_age_group",
-    "perp_sex",
-    "vic_race",
-    "vic_age_group",
-    "vic_sex",
-    "latitude",
-    "longitude",
-    "geocoded_column"
-  ], order: "occur_date DESC", limit: 20000 });
-  const shootingRowsURLCur = buildShootingsURLCurrent({ where: shootingWhere, select: [
-    "incident_key",
-    "statistical_murder_flag",
-    "occur_date",
-    "boro",
-    "location_desc",
-    "perp_race",
-    "perp_age_group",
-    "perp_sex",
-    "vic_race",
-    "vic_age_group",
-    "vic_sex",
-    "latitude",
-    "longitude",
-    "geocoded_column"
-  ], order: "occur_date DESC", limit: 20000 });
 
   try {
     const tFetchStart = Date.now();
@@ -1095,7 +1029,7 @@ export async function GET(req: NextRequest) {
     } catch {}
 
     // Totals
-    let total = dedupTotal;
+    const total = dedupTotal;
 
     // Offense descriptions: prefer aggregated counts when no polygon filter, else dedup rows
     let ofnsTop: { label: string; count: number }[] = [];
@@ -1123,7 +1057,7 @@ export async function GET(req: NextRequest) {
     // Law categories from dedup
     const lawMap = new Map<string, number>();
     dedupLaw.forEach((v, k) => lawMap.set(k, v));
-    let byLaw = Array.from(lawMap.entries())
+    const byLaw = Array.from(lawMap.entries())
       .map(([label, count]) => ({ label, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
@@ -1180,7 +1114,7 @@ export async function GET(req: NextRequest) {
 
     // Age aggregation with canonicalization + unknown/code removal + ordering
     const canonicalizeAge = (labelRaw: string): string => {
-      let L = upper(labelRaw).replace(/–/g, "-");
+      const L = upper(labelRaw).replace(/–/g, "-");
       if (!L || L === "(UNKNOWN)" || L === "(NULL)" || L === "NULL" || L === "U" || L === "UNKNOWN" || /^-?\d+$/.test(L)) return "UNKNOWN";
       if (L === "LESS THAN 18" || L === "UNDER 18" || L === "<18") return "<18";
       if (L === "65 - 74") return "65-74";

@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       // SF categories from both modern and legacy APIs
       const [modernRows, legacyRows] = await Promise.all([
         // Modern API (2018-Present)
-        fetchSocrata<any[]>(buildSFIncidentsURL({
+        fetchSocrata<Array<{ label?: unknown; count?: unknown }>>(buildSFIncidentsURL({
           where: [
             `incident_year IN ('2018','2019','2020','2021','2022','2023','2024','2025')`,
             `incident_category IS NOT NULL`
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
           limit: 1000,
         }), 3600),
         // Legacy API (2003-2018)
-        fetchSocrata<any[]>(buildSFIncidentsLegacyURL({
+        fetchSocrata<Array<{ label?: unknown; count?: unknown }>>(buildSFIncidentsLegacyURL({
           where: [
             `date_extract_y(date) >= 2003`,
             `category IS NOT NULL`
@@ -79,11 +79,11 @@ export async function GET(req: NextRequest) {
 
       // First, add modern categories (authoritative labels)
       for (const r of modernRows || []) {
-        if (!r || !r.label) continue;
+        if (!r || r.label == null) continue;
         const raw = String(r.label);
         const key = canonicalize(raw);
         const pretty = raw; // modern dataset already provides desired casing
-        const count = Number((r as any).count || 0);
+        const count = Number((r as { count?: unknown }).count || 0);
         const prev = byKey.get(key);
         if (prev) prev.count += count;
         else byKey.set(key, { label: pretty, count });
@@ -91,10 +91,10 @@ export async function GET(req: NextRequest) {
 
       // Then, add legacy categories (normalize to Title Case if modern label absent)
       for (const r of legacyRows || []) {
-        if (!r || !r.label) continue;
+        if (!r || r.label == null) continue;
         const raw = String(r.label);
         const key = canonicalize(raw);
-        const count = Number((r as any).count || 0);
+        const count = Number((r as { count?: unknown }).count || 0);
         const prev = byKey.get(key);
         if (prev) {
           prev.count += count;
@@ -111,18 +111,18 @@ export async function GET(req: NextRequest) {
 
     // NYC fallback
     const [complaintsRowsH, complaintsRowsC, shootingsRowsH, shootingsRowsC] = await Promise.all([
-      fetchSocrata<any[]>(complaintsUrl, 3600),
-      fetchSocrata<any[]>(complaintsUrlCur, 3600),
-      fetchSocrata<any[]>(shootingsUrl, 3600),
-      fetchSocrata<any[]>(shootingsUrlCur, 3600),
+      fetchSocrata<Array<{ ofns_desc?: unknown; count?: unknown }>>(complaintsUrl, 3600),
+      fetchSocrata<Array<{ ofns_desc?: unknown; count?: unknown }>>(complaintsUrlCur, 3600),
+      fetchSocrata<Array<{ count?: unknown }>>(shootingsUrl, 3600),
+      fetchSocrata<Array<{ count?: unknown }>>(shootingsUrlCur, 3600),
     ]);
     const complaintsRows = [...complaintsRowsH, ...complaintsRowsC];
     const shootingsRows = [...shootingsRowsH, ...shootingsRowsC];
 
     // Process complaint types
     const complaintTypes = complaintsRows
-      .filter((r) => r.ofns_desc)
-      .map((r) => ({ label: r.ofns_desc as string, count: Number(r.count) }));
+      .filter((r) => r.ofns_desc != null)
+      .map((r) => ({ label: String(r.ofns_desc), count: Number(r.count) }));
 
     // Add shooting incidents as crime types
     const shootingCount = shootingsRows[0]?.count ? Number(shootingsRows[0].count) : 0;
@@ -137,8 +137,8 @@ export async function GET(req: NextRequest) {
       limit: 1,
     });
     
-    const shootingMurdersRows = await fetchSocrata<any[]>(shootingMurdersUrl, 3600);
-    const murderCount = shootingMurdersRows[0]?.count ? Number(shootingMurdersRows[0].count) : 0;
+    const shootingMurdersRows = await fetchSocrata<Array<{ count?: unknown }>>(shootingMurdersUrl, 3600);
+    const murderCount = shootingMurdersRows[0]?.count != null ? Number(shootingMurdersRows[0].count) : 0;
     const nonFatalShootingCount = shootingCount - murderCount;
     
     const shootingTypes = [
@@ -167,8 +167,8 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.count - a.count);
 
     return Response.json(values, { headers: { "Cache-Control": "public, s-maxage=3600" } });
-  } catch (e: any) {
-    return new Response("Failed to load crime types: " + e?.message, { status: 500 });
+  } catch (e: unknown) {
+    return new Response("Failed to load crime types: " + (e instanceof Error ? e.message : String(e)), { status: 500 });
   }
 }
 

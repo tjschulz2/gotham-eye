@@ -44,7 +44,7 @@ export default function Home() {
           New York City. San Francisco.
         </p>
         <h1 className="font-cabinet text-white text-center font-bold leading-[0.9] text-[clamp(3rem,12vw,10rem)] animate-hero-primary">
-          Know Where's Safe.
+          Know Where&#39;s Safe.
         </h1>
       </div>
       <div className="fixed inset-0 z-[11] flex items-center justify-center">

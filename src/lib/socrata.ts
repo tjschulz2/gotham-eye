@@ -62,6 +62,14 @@ export type FetchOptions = {
   group?: string[];
 };
 
+declare global {
+  var __socrataCache: Map<string, { expiresAt: number; data: unknown }>|undefined;
+  var __socrataInflight: Map<string, Promise<unknown>>|undefined;
+  var __rowsCache: Map<string, { expiresAt: number; data: SocrataRow[] }>|undefined;
+  var __rowsInflight: Map<string, Promise<SocrataRow[]>>|undefined;
+  var __rowsInflightShoot: Map<string, Promise<ShootingRow[]>>|undefined;
+}
+
 export function buildSoqlURL(options: FetchOptions, datasetUrl?: string): string {
   const params = new URLSearchParams();
   if (options.select && options.select.length > 0) {
@@ -105,12 +113,12 @@ export function buildSFIncidentsLegacyURL(options: FetchOptions): string {
   return buildSoqlURL(options, SF_INCIDENTS_LEGACY_DATASET_URL);
 }
 
-export async function fetchSocrata<T = any>(url: string, revalidateSeconds?: number): Promise<T> {
+export async function fetchSocrata<T = unknown>(url: string, revalidateSeconds?: number): Promise<T> {
   // In-memory micro-cache + in-flight dedupe to avoid hammering Socrata for identical URLs
-  const cache: Map<string, { expiresAt: number; data: any }> = (globalThis as any).__socrataCache || new Map();
-  const inflight: Map<string, Promise<any>> = (globalThis as any).__socrataInflight || new Map();
-  (globalThis as any).__socrataCache = cache;
-  (globalThis as any).__socrataInflight = inflight;
+  const cache: Map<string, { expiresAt: number; data: unknown }> = globalThis.__socrataCache || new Map();
+  const inflight: Map<string, Promise<unknown>> = globalThis.__socrataInflight || new Map();
+  globalThis.__socrataCache = cache;
+  globalThis.__socrataInflight = inflight;
 
   const now = Date.now();
   const ttlMs = Math.max(1000, (typeof revalidateSeconds === "number" ? revalidateSeconds : 5) * 1000);
@@ -176,7 +184,7 @@ export async function fetchSocrata<T = any>(url: string, revalidateSeconds?: num
       const ds = u.pathname.split("/").pop() || "";
       const limit = u.searchParams.get("$limit");
       const offset = u.searchParams.get("$offset") || "0";
-      const rows = Array.isArray(json) ? (json as any[]).length : (json && typeof json === "object" && "length" in (json as any) ? Number((json as any).length) : -1);
+      const rows = Array.isArray(json) ? (json as unknown[]).length : -1;
       console.log(`[socrata][rows] host=${u.host} dataset=${ds} limit=${limit||''} offset=${offset} rows=${rows}`);
     } catch {}
     return json;
@@ -193,7 +201,7 @@ export async function fetchSocrata<T = any>(url: string, revalidateSeconds?: num
 
 // Fetch all pages for a Socrata query by iterating over $offset in pageSize chunks.
 // Use conservatively to prevent heavy loads. maxRows is a safety cap; stop when a page returns < pageSize.
-export async function fetchSocrataAll<T = any>(
+export async function fetchSocrataAll<T = unknown>(
   url: string,
   pageSize: number = 50000,
   maxRows: number = 250000,
@@ -230,7 +238,7 @@ export async function fetchSocrataAll<T = any>(
 
 // Fetch N pages in parallel for faster first-byte when we know a single page may truncate.
 // This is ideal for tile endpoints where we need a quick snapshot and can tolerate a small, fixed cap.
-export async function fetchSocrataPagesParallel<T = any>(
+export async function fetchSocrataPagesParallel<T = unknown>(
   url: string,
   pageSize: number,
   pages: number,
@@ -280,23 +288,23 @@ export function toFloatingTimestamp(date: Date): string {
 
 // Merge rows that contain a numeric "count" column, grouped by the provided key fields.
 // If keyFields.length === 0, sum all counts into a single row: [{ count }]
-export function mergeAggregateRows<T extends Record<string, any>>(rows: T[], keyFields: string[]): T[] {
+export function mergeAggregateRows<T extends Record<string, unknown>>(rows: T[], keyFields: string[]): T[] {
   if (!rows || rows.length === 0) return [];
   if (!Array.isArray(keyFields)) keyFields = [];
   if (keyFields.length === 0) {
-    const total = rows.reduce((acc, r: any) => acc + Number(r.count || 0), 0);
+    const total = rows.reduce((acc, r) => acc + Number((r as { count?: unknown }).count || 0), 0);
     return [{ count: total }] as unknown as T[];
   }
-  const keyOf = (r: any) => keyFields.map((k) => String(r[k] ?? "")).join("__");
-  const merged = new Map<string, any>();
-  for (const r of rows as any[]) {
+  const keyOf = (r: Record<string, unknown>) => keyFields.map((k) => String(r[k] ?? "")).join("__");
+  const merged = new Map<string, Record<string, unknown>>();
+  for (const r of rows as Record<string, unknown>[]) {
     const k = keyOf(r);
     const prev = merged.get(k);
     if (prev) {
-      prev.count = Number(prev.count || 0) + Number((r as any).count || 0);
+      (prev as { count?: number }).count = Number((prev as { count?: unknown }).count || 0) + Number((r as { count?: unknown }).count || 0);
     } else {
       // Shallow clone to avoid mutating caller data
-      merged.set(k, { ...r, count: Number((r as any).count || 0) });
+      merged.set(k, { ...r, count: Number((r as { count?: unknown }).count || 0) });
     }
   }
   return Array.from(merged.values()) as T[];
@@ -309,11 +317,11 @@ export function mergeAggregateRows<T extends Record<string, any>>(rows: T[], key
 // They fetch a superset of columns used by both stats and aggregate routes and cache
 // merged historic+YTD results for a short period.
 
-function getRowsCache(): Map<string, { expiresAt: number; data: any[] }> {
-  const rowsCache = (globalThis as any).__rowsCache as Map<string, { expiresAt: number; data: any[] }> | undefined;
+function getRowsCache(): Map<string, { expiresAt: number; data: SocrataRow[] }> {
+  const rowsCache = globalThis.__rowsCache as Map<string, { expiresAt: number; data: SocrataRow[] }> | undefined;
   if (rowsCache) return rowsCache;
-  const m = new Map<string, { expiresAt: number; data: any[] }>();
-  (globalThis as any).__rowsCache = m;
+  const m = new Map<string, { expiresAt: number; data: SocrataRow[] }>();
+  globalThis.__rowsCache = m;
   return m;
 }
 
@@ -334,7 +342,7 @@ function whereKey(where: string[]): string {
   return where.join(" AND ");
 }
 
-export async function loadComplaintsRowsCombined(where: string[], ttlMs: number = 20000, cacheKeyOverride?: string): Promise<any[]> {
+export async function loadComplaintsRowsCombined(where: string[], ttlMs: number = 20000, cacheKeyOverride?: string): Promise<SocrataRow[]> {
   const select = [
     "cmplnt_num",
     "ofns_desc",
@@ -363,8 +371,8 @@ export async function loadComplaintsRowsCombined(where: string[], ttlMs: number 
   const urlH = buildComplaintsURL({ where, select, order: "cmplnt_fr_dt DESC" });
   const urlC = buildComplaintsURLCurrent({ where, select, order: "cmplnt_fr_dt DESC" });
   // In-flight dedupe for this combined key so concurrent callers don't trigger duplicate upstream pulls
-  const inflightCombined: Map<string, Promise<any[]>> = (globalThis as any).__rowsInflight || new Map();
-  (globalThis as any).__rowsInflight = inflightCombined;
+  const inflightCombined: Map<string, Promise<SocrataRow[]>> = globalThis.__rowsInflight || new Map();
+  globalThis.__rowsInflight = inflightCombined;
   const inflightKey = `complaints|${key}`;
   const existing = inflightCombined.get(inflightKey);
   if (existing) {
@@ -373,8 +381,8 @@ export async function loadComplaintsRowsCombined(where: string[], ttlMs: number 
   }
   const t0 = Date.now();
   let hMs = 0, cMs = 0;
-  const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<any>(urlH, 50000, 150000); hMs = Date.now()-s; try { console.log(`[rows][complaints][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
-  const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<any>(urlC, 50000, 150000); cMs = Date.now()-s; try { console.log(`[rows][complaints][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
+  const pH = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlH, 50000, 150000); hMs = Date.now()-s; try { console.log(`[rows][complaints][historic] rows=${r.length} ms=${hMs}`); } catch {} return r; })();
+  const pC = (async () => { const s = Date.now(); const r = await fetchSocrataAll<SocrataRow>(urlC, 50000, 150000); cMs = Date.now()-s; try { console.log(`[rows][complaints][ytd] rows=${r.length} ms=${cMs}`); } catch {} return r; })();
   const combinedPromise = (async () => {
     try {
       const [h, c] = await Promise.all([pH, pC]);
@@ -420,8 +428,8 @@ export async function loadShootingsRowsCombined(where: string[], ttlMs: number =
   const urlH = buildShootingsURL({ where, select, order: "occur_date DESC" });
   const urlC = buildShootingsURLCurrent({ where, select, order: "occur_date DESC" });
   // In-flight dedupe for this combined key so concurrent callers don't trigger duplicate upstream pulls
-  const inflightCombined: Map<string, Promise<ShootingRow[]>> = (globalThis as any).__rowsInflightShoot || new Map();
-  (globalThis as any).__rowsInflightShoot = inflightCombined;
+  const inflightCombined: Map<string, Promise<ShootingRow[]>> = globalThis.__rowsInflightShoot || new Map();
+  globalThis.__rowsInflightShoot = inflightCombined;
   const inflightKey = `shootings|${key}`;
   const existing = inflightCombined.get(inflightKey);
   if (existing) {

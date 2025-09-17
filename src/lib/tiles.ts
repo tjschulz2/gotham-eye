@@ -1,40 +1,38 @@
 import geojsonvt from "geojson-vt";
 import vtpbf from "vt-pbf";
+import type { Feature, FeatureCollection as GJFeatureCollection, Geometry } from "geojson";
 
-export type GeoJSONFeature = {
-  type: "Feature";
-  geometry: { type: string; coordinates: any };
-  properties: Record<string, any>;
-};
+export type GeoJSONFeature = Feature<Geometry, Record<string, unknown>>;
 
-export type FeatureCollection = {
-  type: "FeatureCollection";
-  features: GeoJSONFeature[];
-};
+export type FeatureCollection = GJFeatureCollection<Geometry, Record<string, unknown>>;
 
 export function featuresToTilePBF(
   features: GeoJSONFeature[],
   z: number,
   x: number,
   y: number
-): Buffer {
+): Uint8Array {
   const fc: FeatureCollection = { type: "FeatureCollection", features };
-  const tileIndex = geojsonvt(fc as any, {
+  const tileIndex = geojsonvt(fc, {
     maxZoom: 20,
     indexMaxZoom: 14,
     indexMaxPoints: 0,
   });
   const tile = tileIndex.getTile(z, x, y);
-  const layers: Record<string, any> = { points: { features: [] as any[] } };
+  type VTFeature = { type: number; geometry: unknown; tags?: unknown };
+  const layers: Record<string, { features: VTFeature[] }> = {
+    points: { features: [] },
+  };
   if (tile) {
-    layers.points.features = tile.features.map((f: any) => ({
+    layers.points.features = (tile.features as Array<{ geometry: unknown; tags?: unknown }>).map((f) => ({
       type: 1,
       geometry: f.geometry,
       tags: f.tags,
     }));
   }
   // Emit Vector Tile Spec v2 to avoid Mapbox warnings and rendering quirks
-  return Buffer.from(vtpbf.fromGeojsonVt(layers, { version: 2 } as any));
+  const buf = vtpbf.fromGeojsonVt(layers, { version: 2 });
+  return buf instanceof Uint8Array ? buf : new Uint8Array(buf);
 }
 
 

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { buildComplaintsURL, buildShootingsURL, escapeSoqlString, fetchSocrata, fourYearsAgoISOString, toFloatingTimestamp, ShootingRow, buildComplaintsURLCurrent, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
+import { buildComplaintsURL, buildShootingsURL, escapeSoqlString, fetchSocrata, toFloatingTimestamp, buildComplaintsURLCurrent, buildShootingsURLCurrent, buildSFIncidentsURL, buildSFIncidentsLegacyURL } from "@/lib/socrata";
+import type { ShootingRow } from "@/lib/socrata";
 import { buildViolentSoqlCondition, parseViolenceParam } from "@/lib/categories";
 import { featuresToTilePBF, GeoJSONFeature } from "@/lib/tiles";
 
@@ -550,7 +551,17 @@ export async function GET(
     const seen = new Set<string>();
     const deduped: GeoJSONFeature[] = [];
     for (const f of features) {
-      const id = `${f.properties.cmplnt_num || ''}|${(f.geometry.coordinates || []).join(',')}`;
+      let coordKey = "";
+      const geom = f.geometry as { type: string; coordinates?: unknown };
+      const toFlat = (coords: unknown): string => {
+        if (Array.isArray(coords)) {
+          if (coords.length > 0 && typeof coords[0] === 'number') return (coords as number[]).join(',');
+          return (coords as unknown[]).map((c) => toFlat(c)).join(';');
+        }
+        return '';
+      };
+      coordKey = toFlat(geom?.coordinates);
+      const id = `${(f.properties as Record<string, unknown>).cmplnt_num || ''}|${coordKey}`;
       if (seen.has(id)) continue;
       seen.add(id);
       deduped.push(f);
@@ -570,6 +581,7 @@ export async function GET(
     }
 
     const body = featuresToTilePBF(deduped, zNum, xNum, yNum);
+    const raw = (body.buffer as ArrayBuffer).slice(body.byteOffset, body.byteOffset + body.byteLength);
     try {
       const cache = (globalThis as any).__tileCache as Map<string, { expiresAt: number; body: Uint8Array }> || new Map();
       (globalThis as any).__tileCache = cache;
@@ -581,7 +593,7 @@ export async function GET(
       `encode;dur=${tDone - tFetchEnd}`,
       `total;dur=${tDone - tReq}`,
     ].join(", ");
-    return new Response(body, {
+    return new Response(raw, {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.mapbox-vector-tile",
@@ -595,9 +607,12 @@ export async function GET(
     // Return an empty but valid MVT tile when upstream fails (avoid 500s that clear the layer)
     try {
       const body = featuresToTilePBF([], zNum, xNum, yNum);
-      return new Response(body, { status: 200, headers: { "Content-Type": "application/vnd.mapbox-vector-tile", "Cache-Control": "public, s-maxage=60" } });
+      const rawEmpty = (body.buffer as ArrayBuffer).slice(body.byteOffset, body.byteOffset + body.byteLength);
+      return new Response(rawEmpty, { status: 200, headers: { "Content-Type": "application/vnd.mapbox-vector-tile", "Cache-Control": "public, s-maxage=60" } });
     } catch {
-      return new Response(`Upstream error: ${err?.message || "unknown"}`, { status: 200, headers: { "Content-Type": "application/vnd.mapbox-vector-tile" } });
+      const fallbackBuf = new TextEncoder().encode(`Upstream error: ${err?.message || "unknown"}`);
+      const fallbackRaw = (fallbackBuf.buffer as ArrayBuffer).slice(fallbackBuf.byteOffset, fallbackBuf.byteOffset + fallbackBuf.byteLength);
+      return new Response(fallbackRaw, { status: 200, headers: { "Content-Type": "application/vnd.mapbox-vector-tile" } });
     }
   }
 }

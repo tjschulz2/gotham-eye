@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   // Load city polygons from public
   const fcPath = path.join(process.cwd(), "public", city === "sf" ? "sf_nta_2025.geojson" : "nyc_nta_2020.geojson");
   const raw = await fs.readFile(fcPath, "utf8");
-  let nta = JSON.parse(raw);
+  const nta = JSON.parse(raw);
   if (!nta || !Array.isArray(nta.features)) return Response.json({ type: "FeatureCollection", features: [] });
 
   // Guess neighborhood label field

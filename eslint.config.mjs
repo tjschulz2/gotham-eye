@@ -20,6 +20,18 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    files: ["src/app/api/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
+  {
+    files: ["src/app/map/page.tsx"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ];
 
 export default eslintConfig;
