@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 :root {
   --background: #ffffff;
@@ -20,7 +21,160 @@
 }
 
 body {
-  background: var(--background);
+  background: #000000;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@font-face {
+  font-family: "Knockout Bold";
+  src: url("/knockout-bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.font-knockout {
+  font-family: "Knockout Bold", Arial, Helvetica, sans-serif;
+}
+
+@font-face {
+  font-family: "Cabinet Grotesk Bold";
+  src: url("/HeaderFont/CabinetGrotesk-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.font-cabinet {
+  font-family: var(--font-cabinet), Arial, Helvetica, sans-serif;
+  font-weight: 700;
+}
+
+/* Simple skeleton + shimmer */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  background-size: 200% 100%;
+}
+.shimmer {
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Shimmering text with moving gradient highlight */
+.text-shimmer {
+  position: relative;
+  display: inline-block;
+  background: linear-gradient(90deg, rgba(255,255,255,0.55), #ffffff, rgba(255,255,255,0.55));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Ellipsis that animates back and forth (… cycling) */
+.ellipsis-oscillate::after {
+  content: "";
+  display: inline-block;
+  width: 1.5em;
+  text-align: left;
+  animation: dots-pingpong 1.2s steps(3) infinite;
+}
+@keyframes dots-pingpong {
+  0% { content: ""; }
+  16.66% { content: "."; }
+  33.33% { content: ".."; }
+  50% { content: "..."; }
+  66.66% { content: ".."; }
+  83.33% { content: "."; }
+  100% { content: ""; }
+}
+
+/* Entrance animations */
+@keyframes slideDownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-120%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUpFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(120%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInOnly {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-header {
+  opacity: 0;
+  animation: slideDownFadeIn 700ms ease-out forwards;
+}
+
+.animate-hero {
+  opacity: 0;
+  animation: slideUpFadeIn 800ms ease-out forwards;
+  animation-delay: 1s;
+}
+
+.animate-button {
+  opacity: 0;
+  animation: fadeInOnly 500ms ease-out forwards;
+  animation-delay: 1.5s;
+}
+
+.animate-hero-primary {
+  opacity: 0;
+  animation: slideUpFadeIn 800ms ease-out forwards;
+  animation-delay: 0.5s;
+}
+
+.animate-hero-secondary {
+  opacity: 0;
+  animation: slideUpFadeIn 800ms ease-out forwards;
+  animation-delay: 0.9s;
+}
+
+/* Arrow hover oscillation */
+@keyframes arrowOscillateX {
+  from { transform: translateX(0); }
+  to { transform: translateX(5px); }
+}
+
+.arrow-icon { will-change: transform; }
+.group:hover .arrow-icon { animation: arrowOscillateX 700ms ease-in-out infinite alternate; }
+
+/* Rotating loading text animations */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOutDown {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+.fade-in-up {
+  animation: fadeInUp 400ms ease-out forwards;
+}
+
+.fade-out-down {
+  animation: fadeOutDown 400ms ease-in forwards;
 }

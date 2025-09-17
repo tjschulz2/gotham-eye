@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## ThreatsMap – NYPD Complaint Data (last 4 years) on Mapbox
 
-## Getting Started
+This app renders NYPD Complaint Data Historic as vector tiles on Mapbox GL with filters for offense type and law category. Data is fetched from NYC Open Data (Socrata) and converted to Mapbox Vector Tiles on-the-fly per tile.
 
-First, run the development server:
+Data source: `https://data.cityofnewyork.us/resource/qgea-i56i.json`
+
+### Environment variables
+
+- `MAPBOX_API_KEY` (or `NEXT_PUBLIC_MAPBOX_TOKEN`): Mapbox access token
+- `NYC_OPENDATA_APP_TOKEN` (optional but recommended): Socrata app token for higher rate limits
+
+`next.config.ts` exposes `NEXT_PUBLIC_MAPBOX_TOKEN` to the client.
+
+### Scripts
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### API
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `GET /api/crime-types` – returns offense descriptions with counts (last 4 years) for building the filter UI.
+- `GET /api/tiles/{z}/{x}/{y}.mvt?start=ISO&end=ISO&ofns=..&law=..` – returns a Mapbox Vector Tile containing points within the tile bbox. The implementation limits each upstream Socrata pull to 1000 rows for performance; at high zoom levels this typically fits within the tile. Responses are cached (`s-maxage=300`).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Notes & roadmap
 
-## Learn More
+- Current implementation pulls directly from Socrata per tile and is cache-friendly. For web-scale traffic and instant loads, add a background ETL and serve prebuilt tiles from storage/CDN.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
