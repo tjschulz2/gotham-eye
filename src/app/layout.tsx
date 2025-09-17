@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
+const siteUrl = "https://gothameye.com";
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
+  metadataBase: new URL(siteUrl),
   title: "Gotham Eye | The World's Best Open Crime Map and Data",
   description:
     "Explore detailed crime statistics and patterns with Gotham Eye's interactive map. The world's most comprehensive open crime data visualization platform.",
@@ -11,11 +13,11 @@ export const metadata: Metadata = {
     title: "Gotham Eye | The World's Best Open Crime Map and Data",
     description:
       "Explore detailed crime statistics and patterns with Gotham Eye's interactive map. The world's most comprehensive open crime data visualization platform.",
-    url: "/",
+    url: siteUrl,
     siteName: "Gotham Eye",
     images: [
       {
-        url: "/imessageBanner.png",
+        url: `${siteUrl}/imessageBanner.png?v=2`,
         width: 1200,
         height: 630,
         alt: "Gotham Eye preview image",
@@ -29,7 +31,7 @@ export const metadata: Metadata = {
     title: "Gotham Eye | The World's Best Open Crime Map and Data",
     description:
       "Explore detailed crime statistics and patterns with Gotham Eye's interactive map. The world's most comprehensive open crime data visualization platform.",
-    images: ["/imessageBanner.png"],
+    images: [`${siteUrl}/imessageBanner.png?v=2`],
   },
 };
 
