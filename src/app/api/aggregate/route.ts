@@ -259,7 +259,20 @@ export async function GET(req: NextRequest) {
     const sfCitywide = eq(minLon, -122.5149) && eq(minLat, 37.7081) && (eq(maxLon, -122.357) || eq(maxLon, -122.3570)) && eq(maxLat, 37.8324);
     const persist = nycCitywide || sfCitywide;
     const key = [`agg|${nycCitywide?"nyc":"sf"}|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`];
-    const settled = persist ? await unstableCache(compute, key, { revalidate: 86400, tags: ["agg:citywide"] })() : await compute();
+    // Cross-request inflight dedupe: identical requests share the same Promise
+    type Settled = PromiseSettledResult<any[]>[];
+    const inflightMap: Map<string, Promise<Settled>> = ((globalThis as any).__aggInflight as Map<string, Promise<Settled>>) || new Map();
+    (globalThis as any).__aggInflight = inflightMap;
+    const inflightKey = persist
+      ? key[0]
+      : `agg|bbox|${minLon}|${minLat}|${maxLon}|${maxLat}|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`;
+    let settledPromise = inflightMap.get(inflightKey);
+    if (!settledPromise) {
+      const run = persist ? unstableCache(compute, key, { revalidate: 86400, tags: ["agg:citywide"] }) : compute;
+      settledPromise = run();
+      inflightMap.set(inflightKey, settledPromise);
+    }
+    const settled = await settledPromise.finally(() => { inflightMap.delete(inflightKey); });
     const tFetchEnd = Date.now();
     try {
       console.log(

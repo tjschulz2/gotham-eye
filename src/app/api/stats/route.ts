@@ -902,9 +902,22 @@ export async function GET(req: NextRequest) {
     };
     const usePersistent = !hasPoly && !hasBBox; // Citywide
     const statsKey = usePersistent ? [`stats|citywide|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`] : ["volatile"];
-    const { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg, complaintsMs, shootingsMs } = usePersistent
-      ? await unstableCache(computePayload, statsKey, { revalidate: 86400, tags: ["stats:citywide"] })()
-      : await computePayload();
+    // Cross-request inflight dedupe so simultaneous citywide requests join the same work
+    type Parts = { complaintRows: any[]; shootingRows: any[]; cMonH: any[]; cMonC: any[]; sMonH: any[]; sMonC: any[]; ofnsAgg: any; premAgg: any; boroAgg: any; raceAgg: any; ageAgg: any; pairsRaceAgg: any; pairsSexAgg: any; pairsBothAgg: any; shootTotalsAgg: any; complaintsMs: number; shootingsMs: number };
+    const inflightMap: Map<string, Promise<Parts>> = ((globalThis as any).__statsInflight as Map<string, Promise<Parts>>) || new Map();
+    (globalThis as any).__statsInflight = inflightMap;
+    const inflightKey = usePersistent ? statsKey[0] : `stats|bbox|${quantKey}`;
+    const getParts = () => usePersistent
+      ? unstableCache(computePayload, statsKey, { revalidate: 86400, tags: ["stats:citywide"] })()
+      : computePayload();
+    let partsPromise = inflightMap.get(inflightKey);
+    if (!partsPromise) {
+      partsPromise = getParts();
+      inflightMap.set(inflightKey, partsPromise);
+    }
+    const { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg, complaintsMs, shootingsMs } = await partsPromise.finally(() => {
+      inflightMap.delete(inflightKey);
+    });
     const tFetchEnd = Date.now();
     try {
       console.log(
