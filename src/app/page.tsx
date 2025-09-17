@@ -68,7 +68,7 @@ export default function Home() {
             </svg>
           </Link>
           <a
-            href="https://github.com"
+            href="https://github.com/buildingmvp/gotham-eye"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-block text-white/90 font-semibold animate-button transition-colors duration-200 hover:text-gray-300 mt-2"
