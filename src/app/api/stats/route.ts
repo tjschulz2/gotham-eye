@@ -715,185 +715,186 @@ export async function GET(req: NextRequest) {
     const quantKey = hasBBox
       ? `bbox:${q(minLon as number)},${q(minLat as number)},${q(maxLon as number)},${q(maxLat as number)}|s:${startISO}|e:${endISO}|iu:${includeUnknown?'1':'0'}|of:${ofns||''}|law:${law||''}|vc:${vclass||''}`
       : `poly|s:${startISO}|e:${endISO}|iu:${includeUnknown?'1':'0'}|of:${ofns||''}|law:${law||''}|vc:${vclass||''}`;
-    // Unified row loaders with short TTL cache to eliminate duplicate pulls between endpoints
-    let complaintsMs = 0;
-    let shootingsMs = 0;
-    const pComplaints = (async () => {
-      const t0 = Date.now();
-      const rowsAll = await loadComplaintsRowsCombined(where, 20000, `complaints|${quantKey}`);
-      let rows = rowsAll;
-      if (polyGeo && rowsAll && rowsAll.length) {
-        try {
-          const poly = polyGeo;
-          const pointInPolygon = (x: number, y: number, rings: number[][][]): boolean => {
-            let inside = false;
-            for (const ring of rings) {
-              let j = ring.length - 1;
-              for (let i = 0; i < ring.length; i++) {
-                const xi = ring[i][0], yi = ring[i][1];
-                const xj = ring[j][0], yj = ring[j][1];
-                const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
-                if (intersect) inside = !inside;
-                j = i;
-              }
-            }
-            return inside;
-          };
-          const collectRings = (g: any): number[][][] => {
-            if (!g) return [];
-            if (g.type === 'Polygon') return g.coordinates as any;
-            if (g.type === 'MultiPolygon') return ([] as any[]).concat(...(g.coordinates as any[]));
-            return [];
-          };
-          const rings = collectRings(poly);
-          rows = rowsAll.filter((r: any) => {
-            let lat: any = r.latitude; let lon: any = r.longitude;
-            if ((!lat || !lon) && r.lat_lon) {
-              if (typeof r.lat_lon === 'string') {
-                const m = r.lat_lon.match(/(-?\d+\.?\d*)\s+[ ,]\s*(-?\d+\.?\d*)/);
-                if (m) { const a = Number(m[1]); const b = Number(m[2]); if (Math.abs(a) <= 90 && Math.abs(b) <= 180) { lat = a; lon = b; } else { lat = b; lon = a; } }
-              } else if (typeof r.lat_lon === 'object') {
-                lat = r.lat_lon.latitude; lon = r.lat_lon.longitude;
-              }
-            }
-            const x = Number(lon); const y = Number(lat);
-            if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-            return pointInPolygon(x, y, rings);
-          });
-        } catch {}
-      }
-      complaintsMs = Date.now() - t0;
-      try { console.log(`[stats][NYC][seq=${parsed.data.seq || '-'}] complaints rows fetched`, { rows: rows.length, ms: complaintsMs, poly: !!polyGeo }); } catch {}
-      return rows as any[];
-    })();
-    const pShootings = skipShootings
-      ? Promise.resolve([])
-      : (async () => {
-          const t0 = Date.now();
-          const rowsAll = await loadShootingsRowsCombined(shootingWhere, 20000, `shootings|${quantKey}`);
-          let rows = rowsAll;
-          if (polyGeo && rowsAll && rowsAll.length) {
-            try {
-              const poly = polyGeo;
-              const pointInPolygon = (x: number, y: number, rings: number[][][]): boolean => {
-                let inside = false;
-                for (const ring of rings) {
-                  let j = ring.length - 1;
-                  for (let i = 0; i < ring.length; i++) {
-                    const xi = ring[i][0], yi = ring[i][1];
-                    const xj = ring[j][0], yj = ring[j][1];
-                    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
-                    if (intersect) inside = !inside;
-                    j = i;
-                  }
-                }
-                return inside;
-              };
-              const collectRings = (g: any): number[][][] => {
-                if (!g) return [];
-                if (g.type === 'Polygon') return g.coordinates as any;
-                if (g.type === 'MultiPolygon') return ([] as any[]).concat(...(g.coordinates as any[]));
-                return [];
-              };
-              const rings = collectRings(poly);
-              rows = rowsAll.filter((r: any) => {
-                let lat: any = r.latitude; let lon: any = r.longitude;
-                if ((!lat || !lon) && r.geocoded_column) {
-                  if (typeof r.geocoded_column === 'string') {
-                    const m = r.geocoded_column.match(/(-?\d+\.?\d*)\s*[ ,]\s*(-?\d+\.?\d*)/);
-                    if (m) { const a = Number(m[1]); const b = Number(m[2]); if (Math.abs(a) <= 90 && Math.abs(b) <= 180) { lat = a; lon = b; } else { lat = b; lon = a; } }
-                  } else if (typeof r.geocoded_column === 'object' && Array.isArray((r.geocoded_column as any).coordinates)) {
-                    lon = (r.geocoded_column as any).coordinates[0]; lat = (r.geocoded_column as any).coordinates[1];
-                  }
-                }
-                const x = Number(lon); const y = Number(lat);
-                if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-                return pointInPolygon(x, y, rings);
-              });
-            } catch {}
-          }
-          shootingsMs = Date.now() - t0;
-          try { console.log(`[stats][NYC][seq=${parsed.data.seq || '-'}] shootings rows fetched`, { rows: rows.length, ms: shootingsMs, poly: !!polyGeo }); } catch {}
-          return rows as any[];
-        })();
-    // In parallel, fetch monthly aggregates for full coverage across long ranges (used when no polygon filter is applied)
-    const pComplaintsMonthly = fetchSocrata<any[]>(complaintsByMonthURL, 30)
-      .then((rows) => rows || [])
-      .catch(() => []);
-    const pComplaintsMonthlyCur = fetchSocrata<any[]>(complaintsByMonthURLCur, 30)
-      .then((rows) => rows || [])
-      .catch(() => []);
-    const pShootingsMonthly = fetchSocrata<any[]>(shootingsByMonthURL, 30)
-      .then((rows) => rows || [])
-      .catch(() => []);
-    const pShootingsMonthlyCur = fetchSocrata<any[]>(shootingsByMonthURLCur, 30)
-      .then((rows) => rows || [])
-      .catch(() => []);
-
-    const pOfns = Promise.all([
-      fetchSocrata<any[]>(complaintByOfnsURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintByOfnsURLCur, 30).catch(() => []),
-    ]);
-    const pPrem = Promise.all([
-      fetchSocrata<any[]>(complaintByPremURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintByPremURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByPremURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByPremURLCur, 30).catch(() => []),
-    ]);
-    const pBoro = Promise.all([
-      fetchSocrata<any[]>(complaintByBoroURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintByBoroURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByBoroURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByBoroURLCur, 30).catch(() => []),
-    ]);
-    const pRace = Promise.all([
-      fetchSocrata<any[]>(complaintByRaceURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintByRaceURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByRaceURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByRaceURLCur, 30).catch(() => []),
-    ]);
-    const pAge = Promise.all([
-      fetchSocrata<any[]>(complaintByAgeURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintByAgeURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByAgeURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingByAgeURLCur, 30).catch(() => []),
-    ]);
-    // Pairs (aggregated) for citywide parity
-    const pPairsRace = Promise.all([
-      fetchSocrata<any[]>(complaintRaceOnRaceURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintRaceOnRaceURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingRaceOnRaceURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingRaceOnRaceURLCur, 30).catch(() => []),
-    ]);
-    const pPairsSex = Promise.all([
-      fetchSocrata<any[]>(complaintSexOnSexURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintSexOnSexURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingSexOnSexURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingSexOnSexURLCur, 30).catch(() => []),
-    ]);
-    const pPairsBoth = Promise.all([
-      fetchSocrata<any[]>(complaintSexRaceOnSexRaceURL, 30).catch(() => []),
-      fetchSocrata<any[]>(complaintSexRaceOnSexRaceURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingSexRaceOnSexRaceURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingSexRaceOnSexRaceURLCur, 30).catch(() => []),
-    ]);
-    // Shooting totals for offense breakdown
-    const pShootTotals = Promise.all([
-      fetchSocrata<any[]>(shootingTotalsByTypeURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingTotalsByTypeURLCur, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingMurdersByTypeURL, 30).catch(() => []),
-      fetchSocrata<any[]>(shootingMurdersByTypeURLCur, 30).catch(() => []),
-    ]);
-
+    // To ensure cached citywide responses don't trigger upstream fetches, create promises lazily inside computePayload
     const computePayload = async () => {
+      // Unified row loaders with short TTL cache to eliminate duplicate pulls between endpoints
+      let complaintsMs = 0;
+      let shootingsMs = 0;
+      const pComplaints = (async () => {
+        const t0 = Date.now();
+        const rowsAll = await loadComplaintsRowsCombined(where, 20000, `complaints|${quantKey}`);
+        let rows = rowsAll;
+        if (polyGeo && rowsAll && rowsAll.length) {
+          try {
+            const poly = polyGeo;
+            const pointInPolygon = (x: number, y: number, rings: number[][][]): boolean => {
+              let inside = false;
+              for (const ring of rings) {
+                let j = ring.length - 1;
+                for (let i = 0; i < ring.length; i++) {
+                  const xi = ring[i][0], yi = ring[i][1];
+                  const xj = ring[j][0], yj = ring[j][1];
+                  const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+                  if (intersect) inside = !inside;
+                  j = i;
+                }
+              }
+              return inside;
+            };
+            const collectRings = (g: any): number[][][] => {
+              if (!g) return [];
+              if (g.type === 'Polygon') return g.coordinates as any;
+              if (g.type === 'MultiPolygon') return ([] as any[]).concat(...(g.coordinates as any[]));
+              return [];
+            };
+            const rings = collectRings(poly);
+            rows = rowsAll.filter((r: any) => {
+              let lat: any = r.latitude; let lon: any = r.longitude;
+              if ((!lat || !lon) && r.lat_lon) {
+                if (typeof r.lat_lon === 'string') {
+                  const m = r.lat_lon.match(/(-?\d+\.?\d*)\s+[ ,]\s*(-?\d+\.?\d*)/);
+                  if (m) { const a = Number(m[1]); const b = Number(m[2]); if (Math.abs(a) <= 90 && Math.abs(b) <= 180) { lat = a; lon = b; } else { lat = b; lon = a; } }
+                } else if (typeof r.lat_lon === 'object') {
+                  lat = r.lat_lon.latitude; lon = r.lat_lon.longitude;
+                }
+              }
+              const x = Number(lon); const y = Number(lat);
+              if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+              return pointInPolygon(x, y, rings);
+            });
+          } catch {}
+        }
+        complaintsMs = Date.now() - t0;
+        try { console.log(`[stats][NYC][seq=${parsed.data.seq || '-'}] complaints rows fetched`, { rows: rows.length, ms: complaintsMs, poly: !!polyGeo }); } catch {}
+        return rows as any[];
+      })();
+      const pShootings = skipShootings
+        ? Promise.resolve([])
+        : (async () => {
+            const t0 = Date.now();
+            const rowsAll = await loadShootingsRowsCombined(shootingWhere, 20000, `shootings|${quantKey}`);
+            let rows = rowsAll;
+            if (polyGeo && rowsAll && rowsAll.length) {
+              try {
+                const poly = polyGeo;
+                const pointInPolygon = (x: number, y: number, rings: number[][][]): boolean => {
+                  let inside = false;
+                  for (const ring of rings) {
+                    let j = ring.length - 1;
+                    for (let i = 0; i < ring.length; i++) {
+                      const xi = ring[i][0], yi = ring[i][1];
+                      const xj = ring[j][0], yj = ring[j][1];
+                      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+                      if (intersect) inside = !inside;
+                      j = i;
+                    }
+                  }
+                  return inside;
+                };
+                const collectRings = (g: any): number[][][] => {
+                  if (!g) return [];
+                  if (g.type === 'Polygon') return g.coordinates as any;
+                  if (g.type === 'MultiPolygon') return ([] as any[]).concat(...(g.coordinates as any[]));
+                  return [];
+                };
+                const rings = collectRings(poly);
+                rows = rowsAll.filter((r: any) => {
+                  let lat: any = r.latitude; let lon: any = r.longitude;
+                  if ((!lat || !lon) && r.geocoded_column) {
+                    if (typeof r.geocoded_column === 'string') {
+                      const m = r.geocoded_column.match(/(-?\d+\.?\d*)\s*[ ,]\s*(-?\d+\.?\d*)/);
+                      if (m) { const a = Number(m[1]); const b = Number(m[2]); if (Math.abs(a) <= 90 && Math.abs(b) <= 180) { lat = a; lon = b; } else { lat = b; lon = a; } }
+                    } else if (typeof r.geocoded_column === 'object' && Array.isArray((r.geocoded_column as any).coordinates)) {
+                      lon = (r.geocoded_column as any).coordinates[0]; lat = (r.geocoded_column as any).coordinates[1];
+                    }
+                  }
+                  const x = Number(lon); const y = Number(lat);
+                  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+                  return pointInPolygon(x, y, rings);
+                });
+              } catch {}
+            }
+            shootingsMs = Date.now() - t0;
+            try { console.log(`[stats][NYC][seq=${parsed.data.seq || '-'}] shootings rows fetched`, { rows: rows.length, ms: shootingsMs, poly: !!polyGeo }); } catch {}
+            return rows as any[];
+          })();
+      // In parallel, fetch monthly aggregates for full coverage across long ranges (used when no polygon filter is applied)
+      const pComplaintsMonthly = fetchSocrata<any[]>(complaintsByMonthURL, 30)
+        .then((rows) => rows || [])
+        .catch(() => []);
+      const pComplaintsMonthlyCur = fetchSocrata<any[]>(complaintsByMonthURLCur, 30)
+        .then((rows) => rows || [])
+        .catch(() => []);
+      const pShootingsMonthly = fetchSocrata<any[]>(shootingsByMonthURL, 30)
+        .then((rows) => rows || [])
+        .catch(() => []);
+      const pShootingsMonthlyCur = fetchSocrata<any[]>(shootingsByMonthURLCur, 30)
+        .then((rows) => rows || [])
+        .catch(() => []);
+
+      const pOfns = Promise.all([
+        fetchSocrata<any[]>(complaintByOfnsURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintByOfnsURLCur, 30).catch(() => []),
+      ]);
+      const pPrem = Promise.all([
+        fetchSocrata<any[]>(complaintByPremURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintByPremURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByPremURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByPremURLCur, 30).catch(() => []),
+      ]);
+      const pBoro = Promise.all([
+        fetchSocrata<any[]>(complaintByBoroURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintByBoroURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByBoroURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByBoroURLCur, 30).catch(() => []),
+      ]);
+      const pRace = Promise.all([
+        fetchSocrata<any[]>(complaintByRaceURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintByRaceURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByRaceURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByRaceURLCur, 30).catch(() => []),
+      ]);
+      const pAge = Promise.all([
+        fetchSocrata<any[]>(complaintByAgeURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintByAgeURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByAgeURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingByAgeURLCur, 30).catch(() => []),
+      ]);
+      // Pairs (aggregated) for citywide parity
+      const pPairsRace = Promise.all([
+        fetchSocrata<any[]>(complaintRaceOnRaceURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintRaceOnRaceURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingRaceOnRaceURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingRaceOnRaceURLCur, 30).catch(() => []),
+      ]);
+      const pPairsSex = Promise.all([
+        fetchSocrata<any[]>(complaintSexOnSexURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintSexOnSexURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingSexOnSexURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingSexOnSexURLCur, 30).catch(() => []),
+      ]);
+      const pPairsBoth = Promise.all([
+        fetchSocrata<any[]>(complaintSexRaceOnSexRaceURL, 30).catch(() => []),
+        fetchSocrata<any[]>(complaintSexRaceOnSexRaceURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingSexRaceOnSexRaceURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingSexRaceOnSexRaceURLCur, 30).catch(() => []),
+      ]);
+      // Shooting totals for offense breakdown
+      const pShootTotals = Promise.all([
+        fetchSocrata<any[]>(shootingTotalsByTypeURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingTotalsByTypeURLCur, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingMurdersByTypeURL, 30).catch(() => []),
+        fetchSocrata<any[]>(shootingMurdersByTypeURLCur, 30).catch(() => []),
+      ]);
+
       const [complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg] = await Promise.all([
         pComplaints, pShootings, pComplaintsMonthly, pComplaintsMonthlyCur, pShootingsMonthly, pShootingsMonthlyCur, pOfns, pPrem, pBoro, pRace, pAge, pPairsRace, pPairsSex, pPairsBoth, pShootTotals,
       ]);
-      return { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg };
+      return { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg, complaintsMs, shootingsMs };
     };
     const usePersistent = !hasPoly && !hasBBox; // Citywide
     const statsKey = usePersistent ? [`stats|citywide|${startISO}|${endISO}|${includeUnknown?'1':'0'}|${ofns||''}|${law||''}|${vclass||''}`] : ["volatile"];
-    const { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg } = usePersistent
+    const { complaintRows, shootingRows, cMonH, cMonC, sMonH, sMonC, ofnsAgg, premAgg, boroAgg, raceAgg, ageAgg, pairsRaceAgg, pairsSexAgg, pairsBothAgg, shootTotalsAgg, complaintsMs, shootingsMs } = usePersistent
       ? await unstableCache(computePayload, statsKey, { revalidate: 3600, tags: ["stats:citywide"] })()
       : await computePayload();
     const tFetchEnd = Date.now();

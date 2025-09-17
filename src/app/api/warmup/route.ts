@@ -9,27 +9,28 @@ export async function GET(req: NextRequest) {
 
   // Default filters used on initial load
   const start = "2022-01-01T00:00:00.000Z";
+  const end = "2025-12-31T23:59:59.999Z";
   const vclass = "violent,nonviolent";
 
   const urls: string[] = [];
 
   // Stats (sidebar)
-  urls.push(`/api/stats?city=nyc&start=${encodeURIComponent(start)}&includeUnknown=1&vclass=${encodeURIComponent(vclass)}`);
-  urls.push(`/api/stats?city=sf&start=${encodeURIComponent(start)}&includeUnknown=0&vclass=${encodeURIComponent(vclass)}`);
+  urls.push(`/api/stats?city=nyc&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeUnknown=1&vclass=${encodeURIComponent(vclass)}`);
+  urls.push(`/api/stats?city=sf&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeUnknown=0&vclass=${encodeURIComponent(vclass)}`);
 
   // Crime types (sidebar dropdown)
   urls.push(`/api/crime-types?city=nyc`);
   urls.push(`/api/crime-types?city=sf`);
 
   // Neighborhood density (labels/shading when filters present)
-  urls.push(`/api/neighborhoods/density?city=nyc&start=${encodeURIComponent(start)}&includeUnknown=1&vclass=${encodeURIComponent(vclass)}`);
-  urls.push(`/api/neighborhoods/density?city=sf&start=${encodeURIComponent(start)}&includeUnknown=0&vclass=${encodeURIComponent(vclass)}`);
+  urls.push(`/api/neighborhoods/density?city=nyc&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeUnknown=1&vclass=${encodeURIComponent(vclass)}`);
+  urls.push(`/api/neighborhoods/density?city=sf&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeUnknown=0&vclass=${encodeURIComponent(vclass)}`);
 
   // Citywide aggregate grid at a representative zoom for first render
   // NYC bbox
-  urls.push(`/api/aggregate?bbox=${encodeURIComponent("-74.25559,40.49612,-73.70001,40.91553")}&z=10&start=${encodeURIComponent(start)}&includeUnknown=1&vclass=${encodeURIComponent(vclass)}`);
+  urls.push(`/api/aggregate?bbox=${encodeURIComponent("-74.25559,40.49612,-73.70001,40.91553")}&z=10&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeUnknown=1&vclass=${encodeURIComponent(vclass)}`);
   // SF bbox
-  urls.push(`/api/aggregate?bbox=${encodeURIComponent("-122.5149,37.7081,-122.3570,37.8324")}&z=10&start=${encodeURIComponent(start)}&includeUnknown=0&vclass=${encodeURIComponent(vclass)}`);
+  urls.push(`/api/aggregate?bbox=${encodeURIComponent("-122.5149,37.7081,-122.3570,37.8324")}&z=10&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&includeUnknown=0&vclass=${encodeURIComponent(vclass)}`);
 
   // Year range
   urls.push(`/api/year-range`);
