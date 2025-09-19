@@ -6,13 +6,16 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ingest": "tsx ./scripts/ingest-open-data.ts"
   },
   "dependencies": {
     "@mapbox/tilebelt": "^1.0.1",
+    "@types/geojson": "^7946.0.16",
     "@vercel/analytics": "^1.5.0",
+    "@vercel/blob": "^2.0.0",
     "geojson-vt": "^3.2.1",
-    "h3-js": "^4.1.0",
+    "h3-js": "^4.3.0",
     "maplibre-gl": "^5.7.1",
     "next": "15.5.3",
     "react": "19.1.0",
@@ -29,9 +32,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "0.180.0",
+    "dotenv": "^17.2.2",
     "eslint": "^9",
     "eslint-config-next": "15.5.3",
     "tailwindcss": "^4",
+    "tsx": "^4.20.5",
     "typescript": "^5"
   }
 }
