@@ -350,7 +350,7 @@ async function queryDemographics(params: NormalizedQueryParams, spatialFilter: s
 }
 
 // Main query function
-async function queryStats(params: NormalizedQueryParams): Promise<StatsResponse> {
+async function queryStats(params: NormalizedQueryParams, request?: NextRequest): Promise<StatsResponse> {
   // For neighborhood filtering, return the total from choropleth and empty detailed stats for now
   if (params.selectedNeighborhood) {
     console.log(`[Stats API] Getting neighborhood stats for: ${params.selectedNeighborhood}`);
@@ -378,7 +378,15 @@ async function queryStats(params: NormalizedQueryParams): Promise<StatsResponse>
         choroplethParams.set('showNoResults', 'true');
       }
       
-      const choroplethUrl = `http://localhost:3000/api/simple-choropleth?${choroplethParams.toString()}`;
+      // Build the correct base URL for internal API calls
+      let baseUrl = 'http://localhost:3000';
+      if (request) {
+        const protocol = request.headers.get('x-forwarded-proto') || 'http';
+        const host = request.headers.get('host') || 'localhost:3000';
+        baseUrl = `${protocol}://${host}`;
+      }
+      
+      const choroplethUrl = `${baseUrl}/api/simple-choropleth?${choroplethParams.toString()}`;
       console.log(`[Stats API] Calling choropleth API with filters: ${choroplethUrl}`);
       
       const response = await fetch(choroplethUrl);
@@ -611,7 +619,7 @@ export async function GET(request: NextRequest) {
     console.log(`Querying stats for:`, params);
     const startTime = Date.now();
     
-    const response = await queryStats(params);
+    const response = await queryStats(params, request);
     
     const queryTime = Date.now() - startTime;
     console.log(`Stats query completed in ${queryTime}ms`);
