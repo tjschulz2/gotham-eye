@@ -58,7 +58,7 @@ export function useApiData(queryParams: NormalizedQueryParams) {
     return `${params.city}-${params.from}-${params.to}-${[...params.offenses].sort().join(',')}-${[...params.lawClass].sort().join(',')}-${params.selectedNeighborhood || ''}`;
   }, []);
 
-  // Fetch all data in parallel
+  // Fetch all data - filters first, then choropleth and stats in parallel
   const fetchAllData = useCallback(async (params: NormalizedQueryParams) => {
     const requestId = getRequestId(params);
     currentRequestRef.current = requestId;
@@ -80,9 +80,37 @@ export function useApiData(queryParams: NormalizedQueryParams) {
     });
 
     try {
-      // Fetch all endpoints in parallel
-      const [filtersResult, choroplethResult, statsResult] = await Promise.allSettled([
-        dataService.getFilters(params),
+      // First, fetch filters (required for offense validation)
+      console.log('[useApiData] Step 1: Fetching filters...');
+      const filtersResult = await dataService.getFilters(params);
+      
+      // Check if this request is still current (prevent race conditions)
+      if (currentRequestRef.current !== requestId) {
+        return;
+      }
+
+      // Process filters result
+      setData(prev => ({ ...prev, filters: filtersResult }));
+      setErrors(prev => ({ ...prev, filters: null }));
+      setLoading(prev => ({ ...prev, filters: false }));
+      
+      console.log('[useApiData] Step 1 complete: Filters loaded');
+
+      // Now fetch choropleth and stats in parallel (only if offenses are available or showNoResults is set)
+      const shouldFetchData = params.offenses.length > 0 || params.showNoResults;
+      
+      if (!shouldFetchData) {
+        console.log('[useApiData] Skipping choropleth and stats - no offenses selected and showNoResults not set');
+        setLoading(prev => ({
+          ...prev,
+          choropleth: false,
+          stats: false,
+        }));
+        return;
+      }
+
+      console.log('[useApiData] Step 2: Fetching choropleth and stats in parallel...');
+      const [choroplethResult, statsResult] = await Promise.allSettled([
         dataService.getChoropleth(params),
         dataService.getStats(params),
       ]);
@@ -90,14 +118,6 @@ export function useApiData(queryParams: NormalizedQueryParams) {
       // Check if this request is still current (prevent race conditions)
       if (currentRequestRef.current !== requestId) {
         return;
-      }
-
-      // Process filters result
-      if (filtersResult.status === 'fulfilled') {
-        setData(prev => ({ ...prev, filters: filtersResult.value }));
-        setErrors(prev => ({ ...prev, filters: null }));
-      } else {
-        setErrors(prev => ({ ...prev, filters: filtersResult.reason?.message || 'Failed to load filters' }));
       }
 
       // Process choropleth result
@@ -128,15 +148,17 @@ export function useApiData(queryParams: NormalizedQueryParams) {
       }
 
     } catch (error) {
-      // This shouldn't happen with Promise.allSettled, but just in case
-      console.error('Unexpected error in fetchAllData:', error);
+      console.error('[useApiData] Unexpected error in fetchAllData:', error);
+      if (error instanceof Error && error.message.includes('filters')) {
+        setErrors(prev => ({ ...prev, filters: error.message }));
+      }
     } finally {
-      // Update loading states
-      setLoading({
-        filters: false,
+      // Update loading states (filters might already be false from step 1)
+      setLoading(prev => ({
+        ...prev,
         choropleth: false,
         stats: false,
-      });
+      }));
     }
   }, [getRequestId]);
 
