@@ -72,7 +72,7 @@ export function createChoroplethExpression(
   choroplethData: ChoroplethData,
   regionIdField: string,
   opacity: number = 0.2
-): any {
+): unknown {
   const { neighborhoods, scale } = choroplethData;
   
   // Default color for neighborhoods without data
@@ -84,7 +84,7 @@ export function createChoroplethExpression(
   }
   
   // Build MapLibre case expression - each case needs condition, then result
-  const cases: any[] = [];
+  const cases: unknown[] = [];
   
   neighborhoods.forEach(({ regionId, count }) => {
     const color = getChoroplethColor(count, scale, opacity);
@@ -104,7 +104,7 @@ export function createChoroplethExpression(
  * Get the region ID from a neighborhood feature based on city
  */
 export function getRegionIdFromFeature(
-  feature: any,
+  feature: GeoJSON.Feature,
   city: 'nyc' | 'sf'
 ): string | null {
   const props = feature.properties || {};

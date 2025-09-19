@@ -10,6 +10,10 @@ import { getRegionIdFromFeature } from "@/lib/choropleth-colors";
 
 export type Stats = {
   total: number;
+  ofnsTop: Array<{ label: string; count: number }>;
+  byPremises?: Array<{ label: string; count: number }>;
+  byRace?: Array<{ label: string; count: number }>;
+  byAge?: Array<{ label: string; count: number }>;
   byType: { [key: string]: number };
 };
 
@@ -20,14 +24,14 @@ export type ChartSeries = {
 
 export type TrendStats = {
   avgMonthlyPct: number;
-  line: any;
+  line: Array<{ month: string; count: number }>;
   trend: "up" | "down" | "stable";
   percentage: number;
 };
 
 export type SelectedNeighborhood = {
   name: string;
-  feature: any;
+  feature: GeoJSON.Feature;
 } | null;
 
 export interface DataState {
@@ -53,12 +57,12 @@ export interface DataState {
   
   // Chart data
   rotatorResetKey: number;
-  pairsData: any;
+  pairsData: Array<{ label: string; count: number }> | null;
   pairsMode: PairsMode;
   chartSeries: ChartSeries[];
   chartKey: string;
   trendStats: TrendStats | null;
-  aggData: any;
+  aggData: unknown;
   
   // Computed values
   availableYears: number[];
@@ -93,12 +97,12 @@ export interface DataActions {
   
   // Chart actions
   setRotatorResetKey: (key: number | ((prev: number) => number)) => void;
-  setPairsData: (data: any) => void;
+  setPairsData: (data: Array<{ label: string; count: number }> | null) => void;
   setPairsMode: (mode: PairsMode) => void;
   setChartSeries: (series: ChartSeries[]) => void;
   setChartKey: (key: string) => void;
   setTrendStats: (stats: TrendStats | null) => void;
-  setAggData: (data: any) => void;
+  setAggData: (data: unknown) => void;
   
   // Filter actions
   toggleCategory: (category: "violent" | "nonviolent") => void;
@@ -133,12 +137,12 @@ export function useDataState() {
   
   // Chart data
   const [rotatorResetKey, setRotatorResetKey] = useState<number>(0);
-  const [pairsData, setPairsData] = useState<any>(null);
+  const [pairsData, setPairsData] = useState<Array<{ label: string; count: number }> | null>(null);
   const [pairsMode, setPairsMode] = useState<PairsMode>("both");
   const [chartSeries, setChartSeries] = useState<ChartSeries[]>([]);
   const [chartKey, setChartKey] = useState<string>("");
   const [trendStats, setTrendStats] = useState<TrendStats | null>(null);
-  const [aggData, setAggData] = useState<any>(null);
+  const [aggData, setAggData] = useState<unknown>(null);
 
   // Update city config when city changes
   const handleSetCity = (newCity: CityId) => {
@@ -318,9 +322,10 @@ export function useDataState() {
     console.log('[useDataState] 🧹 Clear All Filters clicked!');
     
     // Clear all cached data to ensure fresh API calls
-    const { dataService } = require('@/services/dataService');
-    dataService.clearCache();
-    console.log('[useDataState] 🧹 Cache cleared');
+    import('@/services/dataService').then(({ dataService }) => {
+      dataService.clearCache();
+      console.log('[useDataState] 🧹 Cache cleared');
+    });
     
     setSelectedOffenses([]);
     setSelectedLawClasses([]);

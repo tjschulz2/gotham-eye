@@ -29,7 +29,7 @@ export interface PairsData {
 // Trend stats format
 export interface TrendStats {
   avgMonthlyPct: number;
-  line: (number | null)[];
+  line: Array<{ month: string; count: number }>;
   trend: "up" | "down" | "stable";
   percentage: number;
 }
@@ -191,7 +191,10 @@ export function calculateTrendStats(timeSeries: MonthlyData[]): TrendStats | nul
   const intercept = (sumY - slope * sumX) / n;
   
   // Generate trend line
-  const line = counts.map((_, i) => slope * i + intercept);
+  const line = timeSeries.map((item, i) => ({
+    month: item.month,
+    count: slope * i + intercept
+  }));
   
   // Calculate average monthly percentage change
   const avgCount = sumY / n;

@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import type { CrimeType } from "@/types/crime";
 import type { FiltersResponse } from "@/types/api";
+import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { Stats } from "@/hooks/useDataState";
 
 interface DesktopFiltersProps {
   // State
@@ -39,9 +41,9 @@ interface DesktopFiltersProps {
   viewportWidth: number;
   
   // Map actions
-  mapRef: any;
-  setStats: (stats: any) => void;
-  setAggData: (data: any) => void;
+  mapRef: MapLibreMap | null;
+  setStats: (stats: Stats | null) => void;
+  setAggData: (data: unknown) => void;
 }
 
 export default function DesktopFilters({

@@ -5,6 +5,8 @@ import SearchButton from "./SearchButton";
 import type { CityId } from "@/lib/city-config";
 import type { CrimeType } from "@/types/crime";
 import type { FiltersResponse } from "@/types/api";
+import type { Map as MapLibreMap } from 'maplibre-gl';
+import type { Stats } from "@/hooks/useDataState";
 
 interface MapControlsProps {
   // UI state
@@ -51,9 +53,9 @@ interface MapControlsProps {
   setCity: (city: CityId) => void;
   
   // Map actions
-  mapRef: any;
-  setStats: (stats: any) => void;
-  setAggData: (data: any) => void;}
+  mapRef: MapLibreMap | null;
+  setStats: (stats: Stats | null) => void;
+  setAggData: (data: unknown) => void;}
 
 export default function MapControls({
   isMobile,

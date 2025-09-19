@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { 
   NeighborhoodLayerConfig, 
-  NeighborhoodCollection, 
   NeighborhoodFeature 
 } from '@/types/geojson';
 import {
@@ -12,7 +11,7 @@ import {
   convertToLineFeatures,
   addShimmerBands
 } from '@/lib/geojson-utils';
-import { createChoroplethExpression, getRegionIdFromFeature } from '@/lib/choropleth-colors';
+import { createChoroplethExpression } from '@/lib/choropleth-colors';
 
 interface NeighborhoodLayerProps {
   map: MapLibreMap | null;
@@ -62,8 +61,12 @@ export default function NeighborhoodLayer({ map, config }: NeighborhoodLayerProp
     labels: `neighborhoods-labels-source-${city}`
   }), [city]);
 
-  const isGeoJSONSource = (source: any): source is maplibregl.GeoJSONSource => {
-    return source && typeof source.setData === 'function';
+  const isGeoJSONSource = (source: unknown): source is maplibregl.GeoJSONSource => {
+    return !!(source && 
+             typeof source === 'object' && 
+             source !== null && 
+             'setData' in source && 
+             typeof (source as Record<string, unknown>).setData === 'function');
   };
 
   // Helper function to get the region ID field based on city
@@ -136,12 +139,12 @@ export default function NeighborhoodLayer({ map, config }: NeighborhoodLayerProp
       // Setup fill source and layer
       const existingFillSource = map.getSource(sourceIds.fill);
       if (isGeoJSONSource(existingFillSource)) {
-        existingFillSource.setData(dataWithBands as any);
+        existingFillSource.setData(dataWithBands as GeoJSON.FeatureCollection);
       } else {
         if (existingFillSource) map.removeSource(sourceIds.fill);
         map.addSource(sourceIds.fill, {
           type: 'geojson',
-          data: dataWithBands as any
+          data: dataWithBands as GeoJSON.FeatureCollection
         });
       }
       
@@ -168,12 +171,12 @@ export default function NeighborhoodLayer({ map, config }: NeighborhoodLayerProp
       
       const existingOutlineSource = map.getSource(sourceIds.outline);
       if (isGeoJSONSource(existingOutlineSource)) {
-        existingOutlineSource.setData(lineFeatures as any);
+        existingOutlineSource.setData(lineFeatures as GeoJSON.FeatureCollection);
       } else {
         if (existingOutlineSource) map.removeSource(sourceIds.outline);
         map.addSource(sourceIds.outline, {
           type: 'geojson',
-          data: lineFeatures as any
+          data: lineFeatures as GeoJSON.FeatureCollection
         });
       }
       
@@ -197,12 +200,12 @@ export default function NeighborhoodLayer({ map, config }: NeighborhoodLayerProp
       
       const existingLabelsSource = map.getSource(sourceIds.labels);
       if (isGeoJSONSource(existingLabelsSource)) {
-        existingLabelsSource.setData(labelFeatures as any);
+        existingLabelsSource.setData(labelFeatures as GeoJSON.FeatureCollection);
       } else {
         if (existingLabelsSource) map.removeSource(sourceIds.labels);
         map.addSource(sourceIds.labels, {
           type: 'geojson',
-          data: labelFeatures as any
+          data: labelFeatures as GeoJSON.FeatureCollection
         });
       }
       
@@ -332,7 +335,7 @@ export default function NeighborhoodLayer({ map, config }: NeighborhoodLayerProp
       map.getCanvas().style.cursor = '';
     };
 
-    const handleClick = (e: any) => {
+    const handleClick = (e: maplibregl.MapMouseEvent & { features?: GeoJSON.Feature[] }) => {
       console.log(`[NeighborhoodLayer] ${city} neighborhood clicked`, e);
       const feature = e?.features?.[0];
       if (!feature) return;
@@ -364,7 +367,7 @@ export default function NeighborhoodLayer({ map, config }: NeighborhoodLayerProp
       onNeighborhoodClickRef.current?.(name, feature as NeighborhoodFeature);
     };
 
-    const handleMapClick = (e: any) => {
+    const handleMapClick = (e: maplibregl.MapMouseEvent & { features?: GeoJSON.Feature[] }) => {
       try {
         const hits = map.queryRenderedFeatures(e.point, { layers: [layerIds.fill] }) || [];
         if (hits.length > 0) return; // Clicked on a neighborhood, let layer handler manage

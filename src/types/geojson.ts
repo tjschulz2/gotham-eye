@@ -1,6 +1,6 @@
 export interface NeighborhoodProperties {
   // Common properties that both NYC and SF might have
-  [key: string]: any;
+  [key: string]: unknown;
   
   // Specific fields we'll look for
   name?: string;

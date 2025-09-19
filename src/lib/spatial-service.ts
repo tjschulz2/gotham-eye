@@ -3,10 +3,10 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { polygonToCells, cellToLatLng } from 'h3-js';
+import { polygonToCells, latLngToCell } from 'h3-js';
 import type { FeatureCollection } from 'geojson';
 import type { CityId } from '@/lib/city-config';
-import { getRegionIdFromFeature } from '@/lib/choropleth-colors';
+// import { getRegionIdFromFeature } from '@/lib/choropleth-colors';
 import type {
   NeighborhoodFeature,
   NeighborhoodMeta,
@@ -44,11 +44,11 @@ let isInitialized = false;
 /**
  * Load and parse GeoJSON file
  */
-function loadGeoJSON(filePath: string): FeatureCollection<any> {
+function loadGeoJSON(filePath: string): FeatureCollection {
   try {
     const fullPath = join(process.cwd(), filePath);
     const data = readFileSync(fullPath, 'utf-8');
-    return JSON.parse(data) as FeatureCollection<any>;
+    return JSON.parse(data) as FeatureCollection;
   } catch (error) {
     console.error(`Failed to load GeoJSON file: ${filePath}`, error);
     throw new Error(`Could not load spatial data from ${filePath}`);
@@ -103,7 +103,7 @@ function fillPolygonWithH3(feature: NeighborhoodFeature, resolution: number): st
       // Remove duplicates
       return [...new Set(allCells)];
     } else {
-      console.warn(`Unsupported geometry type: ${(geometry as any).type}`);
+      console.warn(`Unsupported geometry type: ${(geometry as GeoJSON.Geometry).type}`);
       return [];
     }
   } catch (error) {
@@ -229,7 +229,6 @@ export function lookupPoint(cityId: CityId, lat: number, lon: number): PointLook
     }
 
     // Convert lat/lon to H3 index
-    const { latLngToCell } = require('h3-js');
     // H3 expects lat, lon order
     const h3Index = latLngToCell(lat, lon, cityIndex.h3Resolution);
     
@@ -332,7 +331,7 @@ export function getCityIndex(cityId: CityId): CityIndex | null {
 /**
  * Get bounding box for a neighborhood feature
  */
-export function getNeighborhoodBoundsFromFeature(feature: any): { minLat: number; maxLat: number; minLon: number; maxLon: number } | null {
+export function getNeighborhoodBoundsFromFeature(feature: GeoJSON.Feature): { minLat: number; maxLat: number; minLon: number; maxLon: number } | null {
   if (!feature || !feature.geometry) {
     return null;
   }
@@ -342,17 +341,17 @@ export function getNeighborhoodBoundsFromFeature(feature: any): { minLat: number
   let minLon = Infinity;
   let maxLon = -Infinity;
 
-  const processCoordinates = (coords: any[]) => {
+  const processCoordinates = (coords: number[] | number[][]) => {
     if (typeof coords[0] === 'number') {
       // Single coordinate pair [lon, lat]
-      const [lon, lat] = coords;
+      const [lon, lat] = coords as number[];
       minLon = Math.min(minLon, lon);
       maxLon = Math.max(maxLon, lon);
       minLat = Math.min(minLat, lat);
       maxLat = Math.max(maxLat, lat);
     } else {
       // Array of coordinates
-      coords.forEach(processCoordinates);
+      (coords as number[][]).forEach(processCoordinates);
     }
   };
 
@@ -360,7 +359,7 @@ export function getNeighborhoodBoundsFromFeature(feature: any): { minLat: number
     if (feature.geometry.type === 'Polygon') {
       feature.geometry.coordinates.forEach(processCoordinates);
     } else if (feature.geometry.type === 'MultiPolygon') {
-      feature.geometry.coordinates.forEach((polygon: any) => {
+      feature.geometry.coordinates.forEach((polygon) => {
         polygon.forEach(processCoordinates);
       });
     }

@@ -6,7 +6,7 @@ import type { CityId } from '@/lib/city-config';
 // Neighborhood feature from GeoJSON
 export interface NeighborhoodFeature extends Feature<Polygon | MultiPolygon> {
   properties: {
-    [key: string]: any;
+    [key: string]: unknown;
     // Common properties we expect
     name?: string;
     id?: string;
@@ -24,7 +24,7 @@ export interface NeighborhoodMeta {
   regionId: string;
   regionName: string;
   city: CityId;
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
 }
 
 // H3 index mapping

@@ -10,21 +10,14 @@ import {
 } from "@/types/api";
 
 // Cache for API responses
-const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+const cache = new Map<string, { data: unknown; timestamp: number; ttl: number }>();
 
 // In-flight requests to prevent duplicate concurrent calls
-const inflightRequests = new Map<string, Promise<any>>();
+const inflightRequests = new Map<string, Promise<unknown>>();
 
 // Cache utilities
-function getCacheKey(endpoint: string, params: Record<string, any>): string {
-  const sortedParams = Object.keys(params)
-    .sort()
-    .map(key => `${key}=${params[key]}`)
-    .join('&');
-  return `${endpoint}?${sortedParams}`;
-}
 
-function getCachedData(key: string): any | null {
+function getCachedData(key: string): unknown | null {
   const cached = cache.get(key);
   if (!cached) return null;
   
@@ -37,7 +30,7 @@ function getCachedData(key: string): any | null {
   return cached.data;
 }
 
-function setCachedData(key: string, data: any, ttlMs: number = 300000): void { // 5 min default
+function setCachedData(key: string, data: unknown, ttlMs: number = 300000): void { // 5 min default
   cache.set(key, {
     data,
     timestamp: Date.now(),
@@ -45,11 +38,6 @@ function setCachedData(key: string, data: any, ttlMs: number = 300000): void { /
   });
 }
 
-// Clear all cache entries (for "Clear all" functionality)
-function clearCache(): void {
-  cache.clear();
-  inflightRequests.clear();
-}
 
 // Base API call function using QueryParamsBuilder
 async function apiCall<T>(
@@ -77,14 +65,14 @@ async function apiCall<T>(
   if (useCache) {
     const cached = getCachedData(cacheKey);
     if (cached) {
-      return cached;
+      return cached as T;
     }
   }
 
   // Check if request is already in flight
   const existingRequest = inflightRequests.get(cacheKey);
   if (existingRequest) {
-    return existingRequest;
+    return existingRequest as Promise<T>;
   }
 
   // Build URL with search params

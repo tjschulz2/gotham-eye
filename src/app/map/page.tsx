@@ -155,7 +155,7 @@ export default function MapPage() {
   }, [transformedPairsData, dataState.setPairsData]);
 
   // Stable callback for neighborhood selection to prevent re-renders
-  const handleNeighborhoodSelect = useCallback((name: string | null, feature: any, city: string) => {
+  const handleNeighborhoodSelect = useCallback((name: string | null, feature: GeoJSON.Feature | null, city: string) => {
     if (name && feature) {
       console.log('[MapPage] Neighborhood selected:', {
         name,

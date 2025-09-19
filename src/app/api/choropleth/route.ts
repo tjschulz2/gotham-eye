@@ -85,7 +85,7 @@ async function queryChoroplethData(
   const toEscaped = escapeString(`${to} 23:59:59`);
 
   // Build WHERE conditions for filters
-  let whereConditions = [
+  const whereConditions = [
     `city = ${cityEscaped}`,
     `occurred_at >= ${fromEscaped}`,
     `occurred_at <= ${toEscaped}`,
@@ -114,7 +114,7 @@ async function queryChoroplethData(
   const whereClause = whereConditions.join(' AND ');
 
   // Try H3 aggregation first (preferred method)
-  let h3Query = `
+  const h3Query = `
     SELECT 
       geoToH3(lon, lat, 9) as h3_index,
       count() as count

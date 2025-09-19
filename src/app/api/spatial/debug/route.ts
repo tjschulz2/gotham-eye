@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     
     // Find H3 cells for Manhattan regions
     const manhattanCells = Object.entries(nycIndex.h3ToRegionMap)
-      .filter(([cell, regionId]) => regionId.startsWith('MN'))
+      .filter(([, regionId]) => regionId.startsWith('MN'))
       .slice(0, 10);
     
     // Check if Times Square region exists
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
     
     // Find H3 cells for Times Square if it exists
     const timesSquareCells = Object.entries(nycIndex.h3ToRegionMap)
-      .filter(([cell, regionId]) => regionId === 'MN0502')
+      .filter(([, regionId]) => regionId === 'MN0502')
       .slice(0, 5);
 
     return NextResponse.json({

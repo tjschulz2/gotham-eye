@@ -148,8 +148,8 @@ export function useApiData(queryParams: NormalizedQueryParams) {
     try {
       const result = await dataService.getFilters(params);
       setData(prev => ({ ...prev, filters: result }));
-    } catch (error: any) {
-      setErrors(prev => ({ ...prev, filters: error?.message || 'Failed to load filters' }));
+    } catch (error: unknown) {
+      setErrors(prev => ({ ...prev, filters: error instanceof Error ? error.message : 'Failed to load filters' }));
     } finally {
       setLoading(prev => ({ ...prev, filters: false }));
     }
@@ -168,8 +168,8 @@ export function useApiData(queryParams: NormalizedQueryParams) {
     try {
       const result = await dataService.getChoropleth(params);
       setData(prev => ({ ...prev, choropleth: result }));
-    } catch (error: any) {
-      setErrors(prev => ({ ...prev, choropleth: error?.message || 'Failed to load choropleth data' }));
+    } catch (error: unknown) {
+      setErrors(prev => ({ ...prev, choropleth: error instanceof Error ? error.message : 'Failed to load choropleth data' }));
     } finally {
       setLoading(prev => ({ ...prev, choropleth: false }));
     }
@@ -188,8 +188,8 @@ export function useApiData(queryParams: NormalizedQueryParams) {
     try {
       const result = await dataService.getStats(params);
       setData(prev => ({ ...prev, stats: result }));
-    } catch (error: any) {
-      setErrors(prev => ({ ...prev, stats: error?.message || 'Failed to load stats' }));
+    } catch (error: unknown) {
+      setErrors(prev => ({ ...prev, stats: error instanceof Error ? error.message : 'Failed to load stats' }));
     } finally {
       setLoading(prev => ({ ...prev, stats: false }));
     }

@@ -3,6 +3,7 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import type { CityId } from "@/lib/city-config";
 import type { PairsMode } from "@/types/crime";
+import type { Stats, TrendStats } from "@/hooks/useDataState";
 
 // Rotating loading text with fade/slide transitions
 type RotatingLoadingTextProps = { messages: string[]; intervalMs?: number; className?: string; staticMessage?: string; resetKey?: unknown };
@@ -64,9 +65,18 @@ const PieChart = ({ data, size = 140 }: { data: PieItem[]; size?: number }) => {
     color: "",
   });
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const onMove = (e: any) => {
+  const onMove = (e: React.MouseEvent | React.TouchEvent) => {
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    if ('clientX' in e) {
+      // Mouse event
+      setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else {
+      // Touch event
+      const touch = e.touches[0];
+      if (touch) {
+        setPos({ x: touch.clientX - rect.left, y: touch.clientY - rect.top });
+      }
+    }
   };
 
   const radius = size / 2;
@@ -163,12 +173,21 @@ const HBarList = ({ data, width = 360 }: { data: { label: string; count: number;
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const tipRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const onMove = (e: any) => {
+  const onMove = (e: React.MouseEvent | React.TouchEvent) => {
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    if ('clientX' in e) {
+      // Mouse event
+      setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else {
+      // Touch event
+      const touch = e.touches[0];
+      if (touch) {
+        setPos({ x: touch.clientX - rect.left, y: touch.clientY - rect.top });
+      }
+    }
   };
 
-  const formatNumber = (value: any): string => {
+  const formatNumber = (value: number | string): string => {
     if (value === null || value === undefined) return "–";
     const num = typeof value === "number" ? value : Number(value);
     if (!isFinite(num)) return String(value);
@@ -268,9 +287,18 @@ const BarChart = ({ data, width = 360, height = 120, trendLine }: { data: BarDat
   const [hover, setHover] = useState<null | { month: string; count: number; label?: string }>(null);
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const tipRef = useRef<HTMLDivElement | null>(null);
-  const onMove = (e: any) => {
+  const onMove = (e: React.MouseEvent | React.TouchEvent) => {
     const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    if ('clientX' in e) {
+      // Mouse event
+      setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else {
+      // Touch event
+      const touch = e.touches[0];
+      if (touch) {
+        setPos({ x: touch.clientX - rect.left, y: touch.clientY - rect.top });
+      }
+    }
   };
 
   const tickEvery = Math.max(1, Math.round(data.length / 6));
@@ -294,7 +322,7 @@ const BarChart = ({ data, width = 360, height = 120, trendLine }: { data: BarDat
     return path.trim();
   }, [trendLine, data.length, step, bw, h, max]);
 
-  const formatNumber = (value: any): string => {
+  const formatNumber = (value: number | string): string => {
     if (value === null || value === undefined) return "–";
     const num = typeof value === "number" ? value : Number(value);
     if (!isFinite(num)) return String(value);
@@ -391,10 +419,10 @@ interface SidebarProps {
   // Data state
   noDataMode: boolean;
   statsLoading: boolean;
-  stats: any;
-  selectedNeighborhood: { name: string; feature: any } | null;
+  stats: Stats | null;
+  selectedNeighborhood: { name: string; feature: GeoJSON.Feature } | null;
   mapShimmering: boolean;
-  rotatorResetKey: any;
+  rotatorResetKey: string | number;
   
   // City config
   city: CityId;
@@ -415,9 +443,9 @@ interface SidebarProps {
   onChangePairsMode: (mode: PairsMode) => void;
   
   // Chart data
-  chartSeries: any;
+  chartSeries: BarDatum[];
   chartKey: string;
-  trendStats: { avgMonthlyPct: number; line: any } | null;
+  trendStats: TrendStats | null;
 }
 
 export default function Sidebar({
@@ -569,7 +597,7 @@ export default function Sidebar({
                 <div style={{ ...textStyles.header, marginBottom: 8 }}>Incidents</div>
                 <div style={{ maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
                   <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                    {(stats?.ofnsTop || []).map((o: any) => (
+                    {(stats?.ofnsTop || []).map((o) => (
                       <li
                         key={o.label}
                         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}
@@ -587,7 +615,7 @@ export default function Sidebar({
                 <div style={{ background: "#4D4D4D", borderRadius: 8, padding: 16 }}>
                   <div style={{ ...textStyles.header, margin: "0 0 8px 0" }}>Where incidents occur</div>
                   <div style={{ maxHeight: 220, overflowY: "auto", paddingRight: 6 }}>
-                    <HBarList data={(stats.byPremises || []).map((d: any) => ({ label: d.label, count: d.count }))} width={isMobile ? Math.min(360, viewportWidth - 40) : 360} />
+                    <HBarList data={(stats.byPremises || []).map((d) => ({ label: d.label, count: d.count }))} width={isMobile ? Math.min(360, viewportWidth - 40) : 360} />
                   </div>
                 </div>
               ) : null}
@@ -598,14 +626,14 @@ export default function Sidebar({
                   <div style={{ background: "#4D4D4D", borderRadius: 8, flex: 1, padding: 12, display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <div style={{ ...textStyles.header, marginBottom: 8 }}>Suspects by race</div>
                     <PieChart
-                      data={(stats?.byRace || []).map((d: any) => ({ label: d.label, count: d.count }))}
+                      data={(stats?.byRace || []).map((d) => ({ label: d.label, count: d.count }))}
                       size={140}
                     />
                   </div>
                   <div style={{ background: "#4D4D4D", borderRadius: 8, flex: 1, padding: 12, display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <div style={{ ...textStyles.header, marginBottom: 8 }}>Suspects by age</div>
                     <PieChart
-                      data={(stats?.byAge || []).map((d: any) => ({ label: d.label, count: d.count }))}
+                      data={(stats?.byAge || []).map((d) => ({ label: d.label, count: d.count }))}
                       size={140}
                     />
                   </div>
@@ -622,12 +650,12 @@ export default function Sidebar({
                         { key: "race", label: "Race" },
                         { key: "sex", label: "Sex" },
                         { key: "both", label: "Both" },
-                      ] as { key: any; label: string }[]).map((opt) => {
+                      ] as { key: string; label: string }[]).map((opt) => {
                         const active = pairsMode === opt.key;
                         return (
                           <button
                             key={opt.key}
-                            onClick={() => onChangePairsMode(opt.key)}
+                            onClick={() => onChangePairsMode(opt.key as PairsMode)}
                             style={{ fontSize: 12, padding: "4px 8px", borderRadius: 12, border: "1px solid #666", background: active ? "#3A3A3A" : "#4D4D4D", color: "#fff", cursor: "pointer" }}
                           >
                             {opt.label}
@@ -666,7 +694,7 @@ export default function Sidebar({
                   ) : null}
                 </div>
                 <div style={{ overflow: "hidden" }}>
-                  <BarChart key={chartKey} data={chartSeries} width={isMobile ? Math.min(360, viewportWidth - 40) : 360} height={140} trendLine={trendStats?.line} />
+                  <BarChart key={chartKey} data={chartSeries} width={isMobile ? Math.min(360, viewportWidth - 40) : 360} height={140} trendLine={trendStats?.line.map(item => item.count)} />
                 </div>
               </div>
             </div>

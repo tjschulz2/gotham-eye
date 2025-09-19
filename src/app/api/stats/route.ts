@@ -112,69 +112,6 @@ async function executeQuery(query: string): Promise<any[]> {
   return text.trim().split('\n').map(line => JSON.parse(line));
 }
 
-// Get neighborhood-filtered event IDs using efficient grid-based approach like choropleth
-async function getNeighborhoodEventIds(params: NormalizedQueryParams): Promise<Set<string>> {
-  if (!params.selectedNeighborhood) {
-    return new Set();
-  }
-
-  console.log(`[Stats API] Getting event IDs for neighborhood: ${params.selectedNeighborhood}`);
-  
-  // Initialize spatial index
-  const { initializeSpatialIndex, batchLookupPoints } = require('@/lib/spatial-service');
-  initializeSpatialIndex();
-
-  // Use grid aggregation first (like choropleth) to reduce data size
-  const baseWhereClause = buildWhereClause(params);
-  const gridQuery = `
-    SELECT 
-      round(lat, 4) as lat_grid,
-      round(lon, 4) as lon_grid,
-      groupArray(event_id) as event_ids
-    FROM public.crime_events
-    WHERE ${baseWhereClause}
-      AND lat IS NOT NULL 
-      AND lon IS NOT NULL
-    GROUP BY lat_grid, lon_grid
-    ORDER BY length(event_ids) DESC
-  `;
-  
-  const gridData = await executeQuery(gridQuery);
-  console.log(`[Stats API] Found ${gridData.length} grid cells`);
-  
-  if (gridData.length === 0) {
-    return new Set();
-  }
-
-  // Process grid data to find neighborhood events
-  const neighborhoodEventIds = new Set<string>();
-  
-  const batchPoints = gridData.map((row: any) => ({
-    id: `${row.lat_grid}_${row.lon_grid}`,
-    lat: Number(row.lat_grid),
-    lon: Number(row.lon_grid),
-    eventIds: row.event_ids || []
-  }));
-
-  const lookupResults = await batchLookupPoints(params.city, batchPoints);
-  
-  // Collect all event IDs from grid cells in the selected neighborhood
-  for (const result of lookupResults) {
-    if (result && result.regionId === params.selectedNeighborhood) {
-      const gridCell = batchPoints.find(p => p.id === result.pointId);
-      if (gridCell && gridCell.eventIds) {
-        for (const eventId of gridCell.eventIds) {
-          if (eventId && typeof eventId === 'string') {
-            neighborhoodEventIds.add(eventId);
-          }
-        }
-      }
-    }
-  }
-
-  console.log(`[Stats API] Found ${neighborhoodEventIds.size} events in neighborhood ${params.selectedNeighborhood}`);
-  return neighborhoodEventIds;
-}
 
 // Query total events
 async function queryTotalEvents(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<number> {
@@ -482,7 +419,7 @@ async function queryStats(params: NormalizedQueryParams): Promise<StatsResponse>
       console.log(`[Stats API] Getting detailed stats for neighborhood ${params.selectedNeighborhood}`);
       
       // Get the neighborhood bounds and add a simple lat/lon filter
-      const { initializeSpatialIndex, batchLookupPoints } = require('@/lib/spatial-service');
+      const { initializeSpatialIndex, batchLookupPoints } = await import('@/lib/spatial-service');
       initializeSpatialIndex();
 
       // Get ALL events and find which ones are in the neighborhood using grid approach

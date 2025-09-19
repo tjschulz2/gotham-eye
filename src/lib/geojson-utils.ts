@@ -1,6 +1,5 @@
 import type { 
   NeighborhoodCollection, 
-  NeighborhoodFeature, 
   NeighborhoodProperties,
   LabelCollection,
   LabelFeature 
@@ -145,11 +144,11 @@ export function convertToLineFeatures(
   collection: NeighborhoodCollection,
   labelField: string
 ): LabelCollection {
-  const features: any[] = [];
+  const features: GeoJSON.Feature[] = [];
   
   const pushRing = (ring: number[][], properties: NeighborhoodProperties) => {
     if (Array.isArray(ring) && ring.length >= 2 && typeof ring[0]?.[0] === 'number') {
-      const lineProps: any = {};
+      const lineProps: Record<string, unknown> = {};
       lineProps[labelField] = String(properties?.[labelField] || "");
       
       features.push({
@@ -184,7 +183,7 @@ export function convertToLineFeatures(
   
   return {
     type: 'FeatureCollection',
-    features
+    features: features as LabelFeature[]
   };
 }
 
