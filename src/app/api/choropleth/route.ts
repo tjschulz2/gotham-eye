@@ -113,7 +113,7 @@ async function queryChoroplethData(
 
   const whereClause = whereConditions.join(' AND ');
 
-  // Try H3 aggregation first (preferred method)
+  // Try H3 aggregation first (preferred method) with performance settings
   const h3Query = `
     SELECT 
       geoToH3(lon, lat, 9) as h3_index,
@@ -123,6 +123,7 @@ async function queryChoroplethData(
     GROUP BY h3_index
     HAVING h3_index != 0
     ORDER BY count DESC
+    LIMIT 10000
   `;
 
   try {
@@ -148,7 +149,7 @@ async function queryChoroplethData(
     console.warn('H3 query failed, falling back to lat/lon grid:', error);
   }
 
-  // Fallback: Use lat/lon grid aggregation
+  // Fallback: Use lat/lon grid aggregation with performance optimizations
   console.log('Using lat/lon grid fallback');
   const gridQuery = `
     SELECT 
@@ -158,7 +159,9 @@ async function queryChoroplethData(
     FROM public.crime_events
     PREWHERE ${whereClause}
     GROUP BY lat_grid, lon_grid
+    HAVING count > 0
     ORDER BY count DESC
+    LIMIT 5000
   `;
 
   const gridUrl = `${CH_HTTP}/?query=${encodeURIComponent(gridQuery)}&default_format=JSON`;
@@ -319,9 +322,9 @@ export async function GET(request: NextRequest) {
 
     console.log('Querying ClickHouse...');
     
-    // Add timeout to the query
+    // Add timeout to the query - reduced from 30s to 15s
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Request timeout after 30 seconds')), 30000);
+      setTimeout(() => reject(new Error('Request timeout after 15 seconds')), 15000);
     });
 
     const dataPromise = queryChoroplethData(city, from, to, offenses, lawClasses, showNoResults);

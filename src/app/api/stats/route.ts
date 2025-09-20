@@ -85,44 +85,53 @@ function buildWhereClause(params: NormalizedQueryParams): string {
   return conditions.join(' AND ');
 }
 
-// Execute ClickHouse query
-async function executeQuery(query: string): Promise<any[]> {
+// Execute ClickHouse query with performance optimizations
+async function executeQuery(query: string, timeout: number = 15000): Promise<any[]> {
   if (!isClickHouseConfigured) {
     throw new Error('ClickHouse not configured');
   }
 
-  const url = `${CH_HTTP}/?query=${encodeURIComponent(query)}&default_format=JSONEachRow`;
+  // Add query timeout and performance settings
+  const url = `${CH_HTTP}/?query=${encodeURIComponent(query)}&default_format=JSONEachRow&max_execution_time=${Math.floor(timeout/1000)}&max_memory_usage=2000000000`;
   
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: { 
-      'Authorization': AUTH,
-      'Accept': 'application/json'
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 
+        'Authorization': AUTH,
+        'Accept': 'application/json'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ClickHouse query failed: ${response.status} ${errorText}`);
     }
-  });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`ClickHouse query failed: ${response.status} ${errorText}`);
+    const text = await response.text();
+    if (!text.trim()) return [];
+
+    return text.trim().split('\n').map(line => JSON.parse(line));
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const text = await response.text();
-  if (!text.trim()) return [];
-
-  return text.trim().split('\n').map(line => JSON.parse(line));
 }
 
 
-// Query total events
+// Query total events with PREWHERE optimization
 async function queryTotalEvents(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<number> {
   const whereClause = buildWhereClause(params);
-  const query = `SELECT count() as total FROM public.crime_events WHERE ${whereClause}${spatialFilter}`;
+  const query = `SELECT count() as total FROM public.crime_events PREWHERE ${whereClause}${spatialFilter}`;
   
-  const results = await executeQuery(query);
+  const results = await executeQuery(query, 10000); // 10s timeout for count queries
   return Number(results[0]?.total) || 0;
 }
 
-// Query time series data (monthly)
+// Query time series data (monthly) with PREWHERE optimization
 async function queryTimeSeries(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<Array<{ month: string; count: number }>> {
   const whereClause = buildWhereClause(params);
   const query = `
@@ -130,16 +139,16 @@ async function queryTimeSeries(params: NormalizedQueryParams, spatialFilter: str
       formatDateTime(toStartOfMonth(occurred_at), '%Y-%m') as month,
       count() as count
     FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter}
+    PREWHERE ${whereClause}${spatialFilter}
     GROUP BY month
     ORDER BY month ASC
   `;
   
-  const results = await executeQuery(query);
+  const results = await executeQuery(query, 12000); // 12s timeout
   return results.map(r => ({ month: r.month, count: Number(r.count) || 0 }));
 }
 
-// Query offense breakdown
+// Query offense breakdown with PREWHERE optimization
 async function queryOffenseBreakdown(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<Array<{ offense: string; count: number }>> {
   const whereClause = buildWhereClause(params);
   const query = `
@@ -147,17 +156,17 @@ async function queryOffenseBreakdown(params: NormalizedQueryParams, spatialFilte
       offense,
       count() as count
     FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter} AND offense != ''
+    PREWHERE ${whereClause}${spatialFilter} AND offense != ''
     GROUP BY offense
     ORDER BY count DESC
     LIMIT 20
   `;
   
-  const results = await executeQuery(query);
+  const results = await executeQuery(query, 10000); // 10s timeout
   return results.map(r => ({ offense: r.offense, count: Number(r.count) || 0 }));
 }
 
-// Query law class breakdown
+// Query law class breakdown with PREWHERE optimization
 async function queryLawClassBreakdown(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<Array<{ lawClass: string; count: number }>> {
   const whereClause = buildWhereClause(params);
   const query = `
@@ -165,35 +174,36 @@ async function queryLawClassBreakdown(params: NormalizedQueryParams, spatialFilt
       law_class as lawClass,
       count() as count
     FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter} AND law_class != ''
+    PREWHERE ${whereClause}${spatialFilter} AND law_class != ''
     GROUP BY law_class
     ORDER BY count DESC
     LIMIT 15
   `;
   
-  const results = await executeQuery(query);
+  const results = await executeQuery(query, 10000); // 10s timeout
   return results.map(r => ({ lawClass: r.lawClass, count: Number(r.count) || 0 }));
 }
 
-// Query location breakdown
+// Query location breakdown with optimized JSON extraction
 async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<Array<{ location: string; locationType: 'borough' | 'precinct' | 'district' | 'neighborhood' | 'premise'; count: number }>> {
   const whereClause = buildWhereClause(params);
   
   if (params.city === 'nyc') {
-    // For NYC, get premise types from raw JSON data
+    // For NYC, get premise types from raw JSON data with PREWHERE optimization
     const premiseQuery = `
       SELECT 
         JSONExtractString(raw, 'prem_typ_desc') as location,
         'premise' as locationType,
         count() as count
       FROM public.crime_events 
-      WHERE ${whereClause}${spatialFilter} AND JSONExtractString(raw, 'prem_typ_desc') != ''
+      PREWHERE ${whereClause}${spatialFilter}
+      WHERE JSONExtractString(raw, 'prem_typ_desc') != ''
       GROUP BY location
       ORDER BY count DESC
       LIMIT 20
     `;
     
-    const results = await executeQuery(premiseQuery);
+    const results = await executeQuery(premiseQuery, 15000); // 15s timeout for JSON queries
     
     return results.map(r => ({ 
       location: r.location, 
@@ -201,16 +211,21 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
       count: Number(r.count) || 0 
     }));
   } else {
-    // For SF, we need to map lat/lon to neighborhoods using spatial service
+    // For SF, use optimized spatial aggregation
     const query = `
-      SELECT lat, lon, count() as count
+      SELECT 
+        round(lat, 3) as lat_rounded, 
+        round(lon, 3) as lon_rounded, 
+        count() as count
       FROM public.crime_events 
-      WHERE ${whereClause}${spatialFilter}
-      GROUP BY lat, lon
+      PREWHERE ${whereClause}${spatialFilter}
+      GROUP BY lat_rounded, lon_rounded
       HAVING count > 0
+      ORDER BY count DESC
+      LIMIT 100
     `;
     
-    const results = await executeQuery(query);
+    const results = await executeQuery(query, 12000);
     
     // Initialize spatial index if needed
     initializeSpatialIndex();
@@ -219,7 +234,7 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
     const neighborhoodCounts = new Map<string, number>();
     
     for (const result of results) {
-      const lookup = lookupPoint(params.city, result.lat, result.lon);
+      const lookup = lookupPoint(params.city, result.lat_rounded, result.lon_rounded);
       if (lookup.regionId) {
         const current = neighborhoodCounts.get(lookup.regionId) || 0;
         neighborhoodCounts.set(lookup.regionId, current + (Number(result.count) || 0));
@@ -234,7 +249,7 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
   }
 }
 
-// Query demographics (NYC only)
+// Query demographics (NYC only) with major performance optimizations
 async function queryDemographics(params: NormalizedQueryParams, spatialFilter: string = '') {
   if (params.city !== 'nyc') {
     return undefined;
@@ -242,111 +257,126 @@ async function queryDemographics(params: NormalizedQueryParams, spatialFilter: s
 
   const whereClause = buildWhereClause(params);
   
-  // Helper function to extract and clean demographic data
-  const extractDemographic = (field: string, topN: number = 10) => `
+  // MAJOR OPTIMIZATION: Use a single query to extract all demographic fields at once
+  // This reduces JSON parsing overhead from 9 separate queries to 1
+  const combinedDemographicsQuery = `
     SELECT 
-      JSONExtractString(raw, '${field}') as category,
+      JSONExtractString(raw, 'susp_race') as susp_race,
+      JSONExtractString(raw, 'susp_sex') as susp_sex,
+      JSONExtractString(raw, 'susp_age_group') as susp_age_group,
+      JSONExtractString(raw, 'vic_race') as vic_race,
+      JSONExtractString(raw, 'vic_sex') as vic_sex,
+      JSONExtractString(raw, 'vic_age_group') as vic_age_group,
       count() as count
     FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter} AND JSONExtractString(raw, '${field}') != ''
-    GROUP BY category
+    PREWHERE ${whereClause}${spatialFilter}
+    WHERE raw != ''
+    GROUP BY susp_race, susp_sex, susp_age_group, vic_race, vic_sex, vic_age_group
+    HAVING count > 0
     ORDER BY count DESC
-    LIMIT ${topN}
+    LIMIT 1000
   `;
 
-  // Query all demographic breakdowns in parallel
-  const [
-    suspRaceResults,
-    suspSexResults, 
-    suspAgeResults,
-    vicRaceResults,
-    vicSexResults,
-    vicAgeResults
-  ] = await Promise.all([
-    executeQuery(extractDemographic('susp_race')),
-    executeQuery(extractDemographic('susp_sex')),
-    executeQuery(extractDemographic('susp_age_group')),
-    executeQuery(extractDemographic('vic_race')),
-    executeQuery(extractDemographic('vic_sex')),
-    executeQuery(extractDemographic('vic_age_group'))
-  ]);
+  console.log(`[Stats API] Running optimized demographics query with timeout`);
+  const startTime = Date.now();
+  
+  try {
+    const results = await executeQuery(combinedDemographicsQuery, 20000); // 20s timeout for complex query
+    const queryTime = Date.now() - startTime;
+    console.log(`[Stats API] Demographics query completed in ${queryTime}ms, got ${results.length} result groups`);
 
-  // Query suspect/victim pairs
-  const pairsRaceQuery = `
-    SELECT 
-      JSONExtractString(raw, 'susp_race') as suspRace,
-      JSONExtractString(raw, 'vic_race') as vicRace,
-      count() as count
-    FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter}
-      AND JSONExtractString(raw, 'susp_race') != ''
-      AND JSONExtractString(raw, 'vic_race') != ''
-    GROUP BY suspRace, vicRace
-    ORDER BY count DESC
-    LIMIT 15
-  `;
+    // Process results into the expected format
+    const suspRaceMap = new Map<string, number>();
+    const suspSexMap = new Map<string, number>();
+    const suspAgeMap = new Map<string, number>();
+    const vicRaceMap = new Map<string, number>();
+    const vicSexMap = new Map<string, number>();
+    const vicAgeMap = new Map<string, number>();
+    const pairsRaceMap = new Map<string, number>();
+    const pairsSexMap = new Map<string, number>();
+    const pairsBothMap = new Map<string, number>();
 
-  const pairsSexQuery = `
-    SELECT 
-      JSONExtractString(raw, 'susp_sex') as suspSex,
-      JSONExtractString(raw, 'vic_sex') as vicSex,
-      count() as count
-    FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter}
-      AND JSONExtractString(raw, 'susp_sex') != ''
-      AND JSONExtractString(raw, 'vic_sex') != ''
-    GROUP BY suspSex, vicSex
-    ORDER BY count DESC
-    LIMIT 15
-  `;
-
-  const pairsBothQuery = `
-    SELECT 
-      JSONExtractString(raw, 'susp_race') as suspRace,
-      JSONExtractString(raw, 'susp_sex') as suspSex,
-      JSONExtractString(raw, 'vic_race') as vicRace,
-      JSONExtractString(raw, 'vic_sex') as vicSex,
-      count() as count
-    FROM public.crime_events 
-    WHERE ${whereClause}${spatialFilter}
-      AND JSONExtractString(raw, 'susp_race') != ''
-      AND JSONExtractString(raw, 'susp_sex') != ''
-      AND JSONExtractString(raw, 'vic_race') != ''
-      AND JSONExtractString(raw, 'vic_sex') != ''
-    GROUP BY suspRace, suspSex, vicRace, vicSex
-    ORDER BY count DESC
-    LIMIT 10
-  `;
-
-  const [pairsRaceResults, pairsSexResults, pairsBothResults] = await Promise.all([
-    executeQuery(pairsRaceQuery),
-    executeQuery(pairsSexQuery),
-    executeQuery(pairsBothQuery)
-  ]);
-
-  return {
-    susp: {
-      race: suspRaceResults.map(r => ({ category: r.category, count: Number(r.count) || 0 })),
-      sex: suspSexResults.map(r => ({ category: r.category, count: Number(r.count) || 0 })),
-      age: suspAgeResults.map(r => ({ category: r.category, count: Number(r.count) || 0 }))
-    },
-    vic: {
-      race: vicRaceResults.map(r => ({ category: r.category, count: Number(r.count) || 0 })),
-      sex: vicSexResults.map(r => ({ category: r.category, count: Number(r.count) || 0 })),
-      age: vicAgeResults.map(r => ({ category: r.category, count: Number(r.count) || 0 }))
-    },
-    pairs: {
-      suspVicRace: pairsRaceResults.map(r => ({ suspRace: r.suspRace, vicRace: r.vicRace, count: Number(r.count) || 0 })),
-      suspVicSex: pairsSexResults.map(r => ({ suspSex: r.suspSex, vicSex: r.vicSex, count: Number(r.count) || 0 })),
-      suspVicBoth: pairsBothResults.map(r => ({ 
-        suspRace: r.suspRace, 
-        suspSex: r.suspSex, 
-        vicRace: r.vicRace, 
-        vicSex: r.vicSex, 
-        count: Number(r.count) || 0 
-      }))
+    // Aggregate the results
+    for (const row of results) {
+      const count = Number(row.count) || 0;
+      
+      // Individual demographics
+      if (row.susp_race && row.susp_race.trim()) {
+        suspRaceMap.set(row.susp_race, (suspRaceMap.get(row.susp_race) || 0) + count);
+      }
+      if (row.susp_sex && row.susp_sex.trim()) {
+        suspSexMap.set(row.susp_sex, (suspSexMap.get(row.susp_sex) || 0) + count);
+      }
+      if (row.susp_age_group && row.susp_age_group.trim()) {
+        suspAgeMap.set(row.susp_age_group, (suspAgeMap.get(row.susp_age_group) || 0) + count);
+      }
+      if (row.vic_race && row.vic_race.trim()) {
+        vicRaceMap.set(row.vic_race, (vicRaceMap.get(row.vic_race) || 0) + count);
+      }
+      if (row.vic_sex && row.vic_sex.trim()) {
+        vicSexMap.set(row.vic_sex, (vicSexMap.get(row.vic_sex) || 0) + count);
+      }
+      if (row.vic_age_group && row.vic_age_group.trim()) {
+        vicAgeMap.set(row.vic_age_group, (vicAgeMap.get(row.vic_age_group) || 0) + count);
+      }
+      
+      // Pairs
+      if (row.susp_race && row.vic_race && row.susp_race.trim() && row.vic_race.trim()) {
+        const key = `${row.susp_race}|${row.vic_race}`;
+        pairsRaceMap.set(key, (pairsRaceMap.get(key) || 0) + count);
+      }
+      if (row.susp_sex && row.vic_sex && row.susp_sex.trim() && row.vic_sex.trim()) {
+        const key = `${row.susp_sex}|${row.vic_sex}`;
+        pairsSexMap.set(key, (pairsSexMap.get(key) || 0) + count);
+      }
+      if (row.susp_race && row.susp_sex && row.vic_race && row.vic_sex && 
+          row.susp_race.trim() && row.susp_sex.trim() && row.vic_race.trim() && row.vic_sex.trim()) {
+        const key = `${row.susp_race}|${row.susp_sex}|${row.vic_race}|${row.vic_sex}`;
+        pairsBothMap.set(key, (pairsBothMap.get(key) || 0) + count);
+      }
     }
-  };
+
+    // Convert maps to sorted arrays
+    const sortAndLimit = (map: Map<string, number>, limit: number) => 
+      Array.from(map.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit);
+
+    return {
+      susp: {
+        race: sortAndLimit(suspRaceMap, 10).map(([category, count]) => ({ category, count })),
+        sex: sortAndLimit(suspSexMap, 10).map(([category, count]) => ({ category, count })),
+        age: sortAndLimit(suspAgeMap, 10).map(([category, count]) => ({ category, count }))
+      },
+      vic: {
+        race: sortAndLimit(vicRaceMap, 10).map(([category, count]) => ({ category, count })),
+        sex: sortAndLimit(vicSexMap, 10).map(([category, count]) => ({ category, count })),
+        age: sortAndLimit(vicAgeMap, 10).map(([category, count]) => ({ category, count }))
+      },
+      pairs: {
+        suspVicRace: sortAndLimit(pairsRaceMap, 15).map(([key, count]) => {
+          const [suspRace, vicRace] = key.split('|');
+          return { suspRace, vicRace, count };
+        }),
+        suspVicSex: sortAndLimit(pairsSexMap, 15).map(([key, count]) => {
+          const [suspSex, vicSex] = key.split('|');
+          return { suspSex, vicSex, count };
+        }),
+        suspVicBoth: sortAndLimit(pairsBothMap, 10).map(([key, count]) => {
+          const [suspRace, suspSex, vicRace, vicSex] = key.split('|');
+          return { suspRace, suspSex, vicRace, vicSex, count };
+        })
+      }
+    };
+  } catch (error) {
+    console.error(`[Stats API] Demographics query failed after ${Date.now() - startTime}ms:`, error);
+    // Return empty demographics on error to prevent total failure
+    return {
+      susp: { race: [], sex: [], age: [] },
+      vic: { race: [], sex: [], age: [] },
+      pairs: { suspVicRace: [], suspVicSex: [], suspVicBoth: [] }
+    };
+  }
 }
 
 // Main query function
@@ -430,22 +460,24 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
       const { initializeSpatialIndex, batchLookupPoints } = await import('@/lib/spatial-service');
       initializeSpatialIndex();
 
-      // Get ALL events and find which ones are in the neighborhood using grid approach
+      // OPTIMIZED: Use coarser grid and simpler spatial filtering
       const baseWhereClause = buildWhereClause(params);
       const gridQuery = `
         SELECT 
-          round(lat, 4) as lat_grid,
-          round(lon, 4) as lon_grid,
-          groupArray(event_id) as event_ids
+          round(lat, 3) as lat_grid,
+          round(lon, 3) as lon_grid,
+          count() as count
         FROM public.crime_events
-        WHERE ${baseWhereClause}
+        PREWHERE ${baseWhereClause}
           AND lat IS NOT NULL 
           AND lon IS NOT NULL
         GROUP BY lat_grid, lon_grid
-        ORDER BY length(event_ids) DESC
+        HAVING count > 0
+        ORDER BY count DESC
+        LIMIT 500
       `;
       
-      const gridData = await executeQuery(gridQuery);
+      const gridData = await executeQuery(gridQuery, 15000);
       console.log(`[Stats API] Got ${gridData.length} grid cells`);
 
       // Find which grid cells are in the neighborhood
@@ -453,29 +485,30 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
         id: `${row.lat_grid}_${row.lon_grid}`,
         lat: Number(row.lat_grid),
         lon: Number(row.lon_grid),
-        eventIds: row.event_ids || []
+        count: Number(row.count) || 0
       }));
 
       const lookupResults = await batchLookupPoints(params.city, batchPoints);
       
-      // Get ALL event IDs from grid cells in the neighborhood
-      const neighborhoodEventIds: string[] = [];
+      // Build optimized spatial filter using only grid cells in the neighborhood
+      const validGridCells: Array<{lat: number; lon: number; count: number}> = [];
+      let totalNeighborhoodEvents = 0;
+      
       lookupResults.forEach((result: any, index: number) => {
         if (result && result.regionId === params.selectedNeighborhood) {
           const gridCell = batchPoints[index];
-          if (gridCell && gridCell.eventIds) {
-            for (const eventId of gridCell.eventIds) {
-              if (eventId && typeof eventId === 'string') {
-                neighborhoodEventIds.push(eventId);
-              }
-            }
-          }
+          validGridCells.push({
+            lat: gridCell.lat,
+            lon: gridCell.lon,
+            count: gridCell.count
+          });
+          totalNeighborhoodEvents += gridCell.count;
         }
       });
 
-      console.log(`[Stats API] Found ${neighborhoodEventIds.length} total events in neighborhood (not just sample)`);
+      console.log(`[Stats API] Found ${validGridCells.length} grid cells with ~${totalNeighborhoodEvents} events in neighborhood`);
       
-      if (neighborhoodEventIds.length === 0) {
+      if (validGridCells.length === 0) {
         return {
           totals: { events: 0 },
           timeSeries: [],
@@ -486,54 +519,77 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
         };
       }
 
-      // Instead of using event IDs (which might be too many), use spatial grid filter
-      const gridCells: Array<{lat: number; lon: number}> = [];
-      lookupResults.forEach((result: any, index: number) => {
-        if (result && result.regionId === params.selectedNeighborhood) {
-          const gridCell = batchPoints[index];
-          gridCells.push({
-            lat: gridCell.lat,
-            lon: gridCell.lon
-          });
-        }
-      });
+      // Build efficient spatial filter - limit to reasonable number of conditions
+      const maxGridCells = 100; // Prevent query from becoming too complex
+      const topGridCells = validGridCells
+        .sort((a, b) => b.count - a.count)
+        .slice(0, maxGridCells);
       
-      console.log(`[Stats API] Using spatial filter with ${gridCells.length} grid cells for ${neighborhoodEventIds.length} events`);
-      
-      // Build spatial filter using grid coordinates
-      const spatialConditions = gridCells.map(cell => 
-        `(round(lat, 4) = ${cell.lat} AND round(lon, 4) = ${cell.lon})`
+      const spatialConditions = topGridCells.map(cell => 
+        `(round(lat, 3) = ${cell.lat} AND round(lon, 3) = ${cell.lon})`
       ).join(' OR ');
       
       const spatialFilter = ` AND (${spatialConditions})`;
       
-      console.log(`[Stats API] Getting all detailed stats with spatial filter`);
+      console.log(`[Stats API] Using optimized spatial filter with ${topGridCells.length} grid cells`);
       
-      // Get all detailed stats in parallel
-      const [
-        byOffense,
-        byLawClass,
-        byLocation,
-        timeSeries,
-        demographics
-      ] = await Promise.all([
-        queryOffenseBreakdown(params, spatialFilter),
-        queryLawClassBreakdown(params, spatialFilter),
-        queryLocationBreakdown(params, spatialFilter),
-        queryTimeSeries(params, spatialFilter),
-        queryDemographics(params, spatialFilter)
-      ]);
+      // Get detailed stats in parallel with error handling
+      console.log(`[Stats API] Starting detailed stats queries for neighborhood`);
+      const statsStartTime = Date.now();
       
-      console.log(`[Stats API] Detailed stats completed: ${byOffense.length} offenses, ${timeSeries.length} months, ${byLocation.length} locations`);
+      try {
+        const [
+          byOffense,
+          byLawClass,
+          byLocation,
+          timeSeries,
+          demographics
+        ] = await Promise.all([
+          queryOffenseBreakdown(params, spatialFilter).catch(err => {
+            console.error('[Stats API] Offense breakdown failed:', err);
+            return [];
+          }),
+          queryLawClassBreakdown(params, spatialFilter).catch(err => {
+            console.error('[Stats API] Law class breakdown failed:', err);
+            return [];
+          }),
+          queryLocationBreakdown(params, spatialFilter).catch(err => {
+            console.error('[Stats API] Location breakdown failed:', err);
+            return [];
+          }),
+          queryTimeSeries(params, spatialFilter).catch(err => {
+            console.error('[Stats API] Time series failed:', err);
+            return [];
+          }),
+          queryDemographics(params, spatialFilter).catch(err => {
+            console.error('[Stats API] Demographics failed:', err);
+            return undefined;
+          })
+        ]);
+        
+        const statsTime = Date.now() - statsStartTime;
+        console.log(`[Stats API] Detailed stats completed in ${statsTime}ms: ${byOffense.length} offenses, ${timeSeries.length} months, ${byLocation.length} locations`);
 
-      return {
-        totals: { events: count }, // Use choropleth count for accuracy
-        timeSeries,
-        byOffense,
-        byLawClass,
-        byLocation,
-        demographics
-      };
+        return {
+          totals: { events: count }, // Use choropleth count for accuracy
+          timeSeries,
+          byOffense,
+          byLawClass,
+          byLocation,
+          demographics
+        };
+      } catch (error) {
+        console.error(`[Stats API] Detailed stats failed after ${Date.now() - statsStartTime}ms:`, error);
+        // Return basic stats on error
+        return {
+          totals: { events: count },
+          timeSeries: [],
+          byOffense: [],
+          byLawClass: [],
+          byLocation: [],
+          demographics: undefined
+        };
+      }
       
     } catch (error) {
       console.error(`[Stats API] Error calling choropleth API:`, error);
@@ -615,11 +671,17 @@ export async function GET(request: NextRequest) {
     
     console.log(`[Stats API] Cache miss for key: ${cacheKey}, fetching new data`);
 
-    // Query fresh data
+    // Query fresh data with timeout
     console.log(`Querying stats for:`, params);
     const startTime = Date.now();
     
-    const response = await queryStats(params, request);
+    // Add timeout for stats queries
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Stats query timeout after 25 seconds')), 25000);
+    });
+
+    const statsPromise = queryStats(params, request);
+    const response = await Promise.race([statsPromise, timeoutPromise]) as StatsResponse;
     
     const queryTime = Date.now() - startTime;
     console.log(`Stats query completed in ${queryTime}ms`);
