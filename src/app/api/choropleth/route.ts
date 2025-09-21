@@ -116,12 +116,12 @@ async function queryChoroplethData(
   // Try H3 aggregation first (preferred method) with performance settings
   const h3Query = `
     SELECT 
-      geoToH3(lon, lat, 9) as h3_index,
+      lower(hex(geoToH3(lon, lat, 9))) as h3_index,
       count() as count
     FROM public.crime_events
     PREWHERE ${whereClause}
     GROUP BY h3_index
-    HAVING h3_index != 0
+    HAVING h3_index != '0'
     ORDER BY count DESC
     LIMIT 10000
   `;
@@ -129,6 +129,9 @@ async function queryChoroplethData(
   try {
     // Test if ClickHouse supports H3 functions
     const h3Url = `${CH_HTTP}/?query=${encodeURIComponent(h3Query)}&default_format=JSON`;
+    console.log(`[Choropleth API] Executing H3 query:`, h3Query.substring(0, 200) + '...');
+    console.log(`[Choropleth API] H3 URL length: ${h3Url.length}`);
+    
     const h3Res = await fetch(h3Url, {
       method: 'GET',
       headers: { Authorization: AUTH }
@@ -137,12 +140,58 @@ async function queryChoroplethData(
     if (h3Res.ok) {
       const h3RawData = await h3Res.json();
       const h3Data = h3RawData.data || h3RawData;
+      
+      console.log(`[Choropleth API] H3 query successful. Raw data type: ${typeof h3RawData}, Array: ${Array.isArray(h3Data)}, Length: ${h3Data?.length || 0}`);
+      console.log(`[Choropleth API] Sample H3 data:`, h3Data?.slice(0, 2));
 
       if (Array.isArray(h3Data) && h3Data.length > 0) {
-        console.log(`Using H3 aggregation: ${h3Data.length} H3 cells found`);
-        return await processH3Data(city, h3Data);
+        console.log(`[Choropleth API] Using H3 aggregation: ${h3Data.length} H3 cells found`);
+        
+        // TEMPORARY FIX: Process H3 data directly here instead of using the separate function
+        const neighborhoodCounts = new Map<string, number>();
+        const { cellToLatLng } = await import('h3-js');
+        const { lookupPoint, initializeSpatialIndex } = await import('@/lib/spatial-service');
+        
+        // Initialize spatial index
+        initializeSpatialIndex();
+        
+        for (const row of h3Data) {
+          const h3Index = String(row.h3_index || row[0]);
+          const count = parseInt(row.count || row[1] || 0);
+          
+          try {
+            // Convert H3 to lat/lon (cellToLatLng returns [lng, lat])
+            const [lon, lat] = cellToLatLng(h3Index);
+            
+            // Lookup neighborhood
+            const result = lookupPoint(city, lat, lon);
+            
+            if (result.regionId) {
+              const existing = neighborhoodCounts.get(result.regionId) || 0;
+              neighborhoodCounts.set(result.regionId, existing + count);
+            }
+          } catch (error) {
+            console.warn(`[Choropleth API] Error processing H3 cell ${h3Index}:`, error);
+          }
+        }
+        
+        // Convert to response format
+        const neighborhoods = Array.from(neighborhoodCounts.entries()).map(([regionId, count]) => ({
+          regionId,
+          count
+        }));
+        
+        const counts = neighborhoods.map(n => n.count);
+        const scale = computeScale(counts);
+        
+        return { neighborhoods, scale };
+        
+      } else {
+        console.log(`[Choropleth API] H3 data is empty or invalid, falling back to grid`);
       }
     } else {
+      const errorText = await h3Res.text();
+      console.warn(`[Choropleth API] H3 query failed with status ${h3Res.status}:`, errorText);
       console.warn('H3 functions not available in ClickHouse, falling back to lat/lon grid');
     }
   } catch (error) {
@@ -189,6 +238,7 @@ async function queryChoroplethData(
 
 // Process H3 aggregated data from ClickHouse
 async function processH3Data(city: CityId, h3Data: any[]): Promise<ChoroplethResponse> {
+  
   // Convert H3 indices to neighborhood counts
   const neighborhoodCounts = new Map<string, number>();
 
@@ -197,33 +247,45 @@ async function processH3Data(city: CityId, h3Data: any[]): Promise<ChoroplethRes
   
   // Batch process H3 cells to get neighborhoods
   const batchPoints = h3Data.map((row: any) => {
-    const h3Index = row.h3_index || row[0];
+    const h3IndexRaw = row.h3_index || row[0];
     const count = parseInt(row.count || row[1] || 0);
     
-    // Convert H3 cell to lat/lon for neighborhood lookup
-    const [lon, lat] = cellToLatLng(h3Index); // Note: cellToLatLng returns [lng, lat]
+    // H3 index should now be a hexadecimal string from ClickHouse
+    const h3Index = String(h3IndexRaw);
     
-    return {
-      id: h3Index,
-      lat,
-      lon,
-      count
-    };
-  });
+    try {
+      // Convert H3 cell to lat/lon for neighborhood lookup
+      const [lon, lat] = cellToLatLng(h3Index); // Note: cellToLatLng returns [lng, lat]
+      
+      return {
+        id: h3Index,
+        lat, // This is correct now - lat from cellToLatLng
+        lon, // This is correct now - lon from cellToLatLng  
+        count
+      };
+    } catch (error) {
+      console.warn(`[Choropleth API] Invalid H3 index: ${h3IndexRaw} (${h3Index})`, error);
+      return null;
+    }
+  }).filter(Boolean); // Remove null entries
 
   // Batch lookup neighborhoods
-  const lookupResults = batchLookupPoints(city, batchPoints.map(p => ({
-    lat: p.lat,
-    lon: p.lon,
-    id: p.id
+  const lookupResults = batchLookupPoints(city, batchPoints.filter(p => p).map(p => ({
+    lat: p!.lat,
+    lon: p!.lon,
+    id: p!.id
   })));
+  
 
   // Aggregate counts by neighborhood
   lookupResults.forEach((result, index) => {
     if (result.regionId) {
-      const count = batchPoints[index].count;
-      const existing = neighborhoodCounts.get(result.regionId) || 0;
-      neighborhoodCounts.set(result.regionId, existing + count);
+      const point = batchPoints[index];
+      if (point) {
+        const count = point.count;
+        const existing = neighborhoodCounts.get(result.regionId) || 0;
+        neighborhoodCounts.set(result.regionId, existing + count);
+      }
     }
   });
 
@@ -259,8 +321,44 @@ async function processGridData(city: CityId, gridData: any[]): Promise<Choroplet
   // Batch lookup neighborhoods
   const lookupResults = batchLookupPoints(city, batchPoints.map(p => ({
     lat: p.lat,
-    lon: p.lon
+    lon: p.lon,
+    id: `grid_${p.lat}_${p.lon}`
   })));
+  
+  // Debug Clinton Hill specifically for grid data
+  if (city === 'nyc') {
+    console.log(`[Choropleth API] DEBUG GRID: Processing ${batchPoints.length} grid points for NYC`);
+    const clintonHillGridPoints = batchPoints.filter(p => 
+      p.lat >= 40.680 && p.lat <= 40.699 && p.lon >= -73.971 && p.lon <= -73.958
+    );
+    console.log(`[Choropleth API] DEBUG GRID: ${clintonHillGridPoints.length} grid points in Clinton Hill area`);
+    
+    if (clintonHillGridPoints.length > 0) {
+      console.log(`[Choropleth API] DEBUG GRID: Sample Clinton Hill grid points:`, clintonHillGridPoints.slice(0, 3));
+      console.log(`[Choropleth API] DEBUG GRID: Total crimes in Clinton Hill grid points:`, 
+        clintonHillGridPoints.reduce((sum, p) => sum + p.count, 0)
+      );
+      
+      // Check what the spatial lookup returns for these points
+      const clintonHillGridLookups = lookupResults.filter((result, index) => {
+        const point = batchPoints[index];
+        return point.lat >= 40.680 && point.lat <= 40.699 && point.lon >= -73.971 && point.lon <= -73.958;
+      });
+      
+      console.log(`[Choropleth API] DEBUG GRID: Clinton Hill grid lookup results:`, clintonHillGridLookups.slice(0, 3));
+      
+      const bk0204GridResults = clintonHillGridLookups.filter(r => r.regionId === 'BK0204');
+      console.log(`[Choropleth API] DEBUG GRID: ${bk0204GridResults.length} grid points mapped to BK0204`);
+      
+      if (bk0204GridResults.length > 0) {
+        const totalCrimesForBK0204 = bk0204GridResults.reduce((sum, result, index) => {
+          const originalIndex = lookupResults.indexOf(result);
+          return sum + (originalIndex >= 0 ? batchPoints[originalIndex].count : 0);
+        }, 0);
+        console.log(`[Choropleth API] DEBUG GRID: Total crimes that should be attributed to BK0204: ${totalCrimesForBK0204}`);
+      }
+    }
+  }
 
   console.log(`Lookup results: ${lookupResults.length} results`);
   console.log('Sample lookup results:', lookupResults.slice(0, 3));
@@ -301,6 +399,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const { city, from, to, offenses, lawClasses, showNoResults } = validateParams(searchParams);
     console.log(`Request params: city=${city}, from=${from}, to=${to}, offenses=${offenses.length}, lawClasses=${lawClasses.length}`);
+    console.log(`Offenses array:`, offenses);
+    console.log(`Law classes array:`, lawClasses);
+    console.log(`Show no results:`, showNoResults);
 
     // Require ClickHouse to be configured
     if (!isClickHouseConfigured) {

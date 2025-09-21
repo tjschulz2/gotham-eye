@@ -54,6 +54,25 @@ function validateAndNormalizeParams(searchParams: URLSearchParams): NormalizedQu
   };
 }
 
+// Get approximate bounding box for known neighborhoods
+function getNeighborhoodBounds(neighborhoodId: string): { minLat: number; maxLat: number; minLon: number; maxLon: number } | null {
+  // Define bounding boxes for major neighborhoods
+  const bounds: Record<string, { minLat: number; maxLat: number; minLon: number; maxLon: number }> = {
+    // Brooklyn neighborhoods
+    'BK0204': { minLat: 40.680, maxLat: 40.699, minLon: -73.971, maxLon: -73.958 }, // Clinton Hill
+    'BK0302': { minLat: 40.650, maxLat: 40.670, minLon: -73.990, maxLon: -73.970 }, // Downtown Brooklyn
+    
+    // Manhattan neighborhoods  
+    'MN0501': { minLat: 40.740, maxLat: 40.760, minLon: -73.995, maxLon: -73.975 }, // Midtown South-Flatiron-Union Square
+    'MN0502': { minLat: 40.750, maxLat: 40.770, minLon: -73.995, maxLon: -73.975 }, // Midtown-Times Square
+    'MN0302': { minLat: 40.710, maxLat: 40.730, minLon: -73.995, maxLon: -73.975 }, // Lower East Side
+    
+    // Add more as needed - for now, return null for unknown neighborhoods to disable spatial filtering
+  };
+  
+  return bounds[neighborhoodId] || null;
+}
+
 // Build WHERE clause for ClickHouse queries
 function buildWhereClause(params: NormalizedQueryParams): string {
   const conditions = [
@@ -452,92 +471,22 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
           demographics: undefined
         };
       }
-
-      // Simple approach: Just add neighborhood filter to the base WHERE clause
+      
+      // Use a simpler approach for neighborhood filtering: use the choropleth count for totals
+      // but still get detailed breakdowns using a bounding box approach
       console.log(`[Stats API] Getting detailed stats for neighborhood ${params.selectedNeighborhood}`);
       
-      // Get the neighborhood bounds and add a simple lat/lon filter
-      const { initializeSpatialIndex, batchLookupPoints } = await import('@/lib/spatial-service');
-      initializeSpatialIndex();
-
-      // OPTIMIZED: Use coarser grid and simpler spatial filtering
-      const baseWhereClause = buildWhereClause(params);
-      const gridQuery = `
-        SELECT 
-          round(lat, 3) as lat_grid,
-          round(lon, 3) as lon_grid,
-          count() as count
-        FROM public.crime_events
-        PREWHERE ${baseWhereClause}
-          AND lat IS NOT NULL 
-          AND lon IS NOT NULL
-        GROUP BY lat_grid, lon_grid
-        HAVING count > 0
-        ORDER BY count DESC
-        LIMIT 500
-      `;
+      // Get approximate bounding box for the neighborhood and use it for detailed queries
+      // This is a simplified approach that should work better than the grid method
+      const neighborhoodBounds = getNeighborhoodBounds(params.selectedNeighborhood);
+      const spatialFilter = neighborhoodBounds ? 
+        ` AND lat BETWEEN ${neighborhoodBounds.minLat} AND ${neighborhoodBounds.maxLat} AND lon BETWEEN ${neighborhoodBounds.minLon} AND ${neighborhoodBounds.maxLon}` :
+        ''; // Fallback to no spatial filter if bounds not available
       
-      const gridData = await executeQuery(gridQuery, 15000);
-      console.log(`[Stats API] Got ${gridData.length} grid cells`);
-
-      // Find which grid cells are in the neighborhood
-      const batchPoints = gridData.map((row: any) => ({
-        id: `${row.lat_grid}_${row.lon_grid}`,
-        lat: Number(row.lat_grid),
-        lon: Number(row.lon_grid),
-        count: Number(row.count) || 0
-      }));
-
-      const lookupResults = await batchLookupPoints(params.city, batchPoints);
-      
-      // Build optimized spatial filter using only grid cells in the neighborhood
-      const validGridCells: Array<{lat: number; lon: number; count: number}> = [];
-      let totalNeighborhoodEvents = 0;
-      
-      lookupResults.forEach((result: any, index: number) => {
-        if (result && result.regionId === params.selectedNeighborhood) {
-          const gridCell = batchPoints[index];
-          validGridCells.push({
-            lat: gridCell.lat,
-            lon: gridCell.lon,
-            count: gridCell.count
-          });
-          totalNeighborhoodEvents += gridCell.count;
-        }
-      });
-
-      console.log(`[Stats API] Found ${validGridCells.length} grid cells with ~${totalNeighborhoodEvents} events in neighborhood`);
-      
-      if (validGridCells.length === 0) {
-        return {
-          totals: { events: 0 },
-          timeSeries: [],
-          byOffense: [],
-          byLawClass: [],
-          byLocation: [],
-          demographics: undefined
-        };
-      }
-
-      // Build efficient spatial filter - limit to reasonable number of conditions
-      const maxGridCells = 100; // Prevent query from becoming too complex
-      const topGridCells = validGridCells
-        .sort((a, b) => b.count - a.count)
-        .slice(0, maxGridCells);
-      
-      const spatialConditions = topGridCells.map(cell => 
-        `(round(lat, 3) = ${cell.lat} AND round(lon, 3) = ${cell.lon})`
-      ).join(' OR ');
-      
-      const spatialFilter = ` AND (${spatialConditions})`;
-      
-      console.log(`[Stats API] Using optimized spatial filter with ${topGridCells.length} grid cells`);
-      
-      // Get detailed stats in parallel with error handling
-      console.log(`[Stats API] Starting detailed stats queries for neighborhood`);
-      const statsStartTime = Date.now();
+      console.log(`[Stats API] Using spatial filter for ${params.selectedNeighborhood}:`, spatialFilter);
       
       try {
+        // Get detailed stats in parallel
         const [
           byOffense,
           byLawClass,
@@ -567,9 +516,6 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
           })
         ]);
         
-        const statsTime = Date.now() - statsStartTime;
-        console.log(`[Stats API] Detailed stats completed in ${statsTime}ms: ${byOffense.length} offenses, ${timeSeries.length} months, ${byLocation.length} locations`);
-
         return {
           totals: { events: count }, // Use choropleth count for accuracy
           timeSeries,
@@ -579,7 +525,7 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
           demographics
         };
       } catch (error) {
-        console.error(`[Stats API] Detailed stats failed after ${Date.now() - statsStartTime}ms:`, error);
+        console.error(`[Stats API] Detailed stats failed:`, error);
         // Return basic stats on error
         return {
           totals: { events: count },
@@ -590,7 +536,7 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
           demographics: undefined
         };
       }
-      
+
     } catch (error) {
       console.error(`[Stats API] Error calling choropleth API:`, error);
       return {
