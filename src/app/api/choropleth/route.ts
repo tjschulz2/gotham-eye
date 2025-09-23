@@ -151,7 +151,7 @@ async function queryChoroplethData(
     GROUP BY h3_index
     HAVING h3_index != '0'
     ORDER BY count DESC
-    LIMIT 10000
+    LIMIT 50000
   `;
 
   try {
@@ -238,7 +238,7 @@ async function queryChoroplethData(
     GROUP BY lat_grid, lon_grid
     HAVING count > 0
     ORDER BY count DESC
-    LIMIT 5000
+    LIMIT 25000
   `;
 
   const gridUrl = `${CH_HTTP}/?query=${encodeURIComponent(gridQuery)}&default_format=JSON`;

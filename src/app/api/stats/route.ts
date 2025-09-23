@@ -187,7 +187,6 @@ async function queryOffenseBreakdown(params: NormalizedQueryParams, spatialFilte
     PREWHERE ${whereClause}${spatialFilter} AND offense != ''
     GROUP BY offense
     ORDER BY count DESC
-    LIMIT 20
   `;
   
   const results = await executeQuery(query, 10000); // 10s timeout
@@ -205,7 +204,6 @@ async function queryLawClassBreakdown(params: NormalizedQueryParams, spatialFilt
     PREWHERE ${whereClause}${spatialFilter} AND law_class != ''
     GROUP BY law_class
     ORDER BY count DESC
-    LIMIT 15
   `;
   
   const results = await executeQuery(query, 10000); // 10s timeout
@@ -229,7 +227,6 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
       WHERE JSONExtractString(raw, 'prem_typ_desc') != ''
       GROUP BY location
       ORDER BY count DESC
-      LIMIT 20
     `;
     
     const results = await executeQuery(premiseQuery, 15000); // 15s timeout for JSON queries
@@ -283,7 +280,7 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
     const neighborhoodCounts = new Map<string, number>();
     let processedCount = 0;
     let unmappedCount = 0;
-    let sampleUnmapped: Array<{lat: number, lon: number, count: number}> = [];
+    const sampleUnmapped: Array<{lat: number, lon: number, count: number}> = [];
     
     // Process coordinate groups and map to neighborhoods
     
