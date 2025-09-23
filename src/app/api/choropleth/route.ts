@@ -53,37 +53,41 @@ function computeScale(counts: number[]): { min: number; max: number; p50: number
   const sorted = [...counts].sort((a, b) => a - b);
   const len = sorted.length;
 
-  // For very small datasets, ensure we have meaningful percentiles
-  if (len === 1) {
-    const value = sorted[0];
-    return {
-      min: value,
-      max: value,
-      p50: value,
-      p90: value,
-      p99: value
-    };
-  }
-
-  // For small datasets (2-5 items), spread the percentiles more evenly
-  if (len <= 5) {
-    return {
-      min: sorted[0],
-      max: sorted[len - 1],
-      p50: sorted[Math.floor(len / 2)],
-      p90: sorted[Math.max(1, len - 2)], // Second highest or higher
-      p99: sorted[len - 1]
-    };
-  }
-
-  // Standard percentile calculation for larger datasets
-  return {
+  const scale = {
     min: sorted[0],
     max: sorted[len - 1],
     p50: sorted[Math.floor(len * 0.5)],
     p90: sorted[Math.floor(len * 0.9)],
     p99: sorted[Math.floor(len * 0.99)]
   };
+
+  // For very low data scenarios, ensure some spread in percentiles
+  // This helps with color distribution when there are few unique values
+  if (len <= 5 && scale.min === scale.max) {
+    // All values are the same, create artificial spread for better visualization
+    const baseValue = scale.min;
+    return {
+      min: baseValue,
+      max: baseValue,
+      p50: baseValue,
+      p90: baseValue,
+      p99: baseValue
+    };
+  } else if (len <= 10 && scale.p50 === scale.p90) {
+    // Very few unique values, adjust percentiles to create some spread
+    const range = scale.max - scale.min;
+    if (range > 0) {
+      return {
+        min: scale.min,
+        max: scale.max,
+        p50: scale.min + Math.floor(range * 0.3),
+        p90: scale.min + Math.floor(range * 0.7),
+        p99: scale.max
+      };
+    }
+  }
+
+  return scale;
 }
 
 // Query ClickHouse for crime data with H3 aggregation

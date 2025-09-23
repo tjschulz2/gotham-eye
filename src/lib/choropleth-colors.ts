@@ -13,18 +13,17 @@ export function getChoroplethColor(
     return `rgba(107, 114, 128, ${opacity})`; // Gray for no data
   }
 
-  // Handle edge cases where scale values might be the same (very sparse data)
-  const range = scale.max - scale.min;
-  if (range === 0 || scale.min === scale.max) {
-    // All values are the same - use a middle color
-    console.log(`[Choropleth] Uniform data detected: count=${count}, scale=${JSON.stringify(scale)}`);
-    return `rgba(124, 255, 102, ${opacity})`; // Light green for uniform data
+  // Handle edge case where all values are the same (very low data scenarios)
+  if (scale.min === scale.max) {
+    // All neighborhoods have the same count, use a mid-range color
+    const midColor = [124, 255, 102]; // Light green from color stops
+    return `rgba(${midColor[0]}, ${midColor[1]}, ${midColor[2]}, ${opacity})`;
   }
 
   // Normalize the count to a 0-1 scale using percentiles
   let normalizedValue: number;
   
-  // Check for division by zero scenarios and handle gracefully
+  // Handle cases where percentiles might be equal (low data scenarios)
   const p50Range = scale.p50 - scale.min;
   const p90Range = scale.p90 - scale.p50;
   const maxRange = scale.max - scale.p90;
@@ -39,7 +38,7 @@ export function getChoroplethColor(
   } else if (count <= scale.p90) {
     // Medium crime: 0.5 to 0.8 (light blue to orange)
     if (p90Range === 0) {
-      normalizedValue = 0.65; // Default to medium-high if no range
+      normalizedValue = 0.65; // Default to medium if no range
     } else {
       normalizedValue = 0.5 + (count - scale.p50) / p90Range * 0.3;
     }
@@ -80,24 +79,14 @@ export function getChoroplethColor(
   }
 
   // Interpolate between the two stops
-  const colorRange = upperStop.value - lowerStop.value;
-  const t = colorRange === 0 ? 0 : (normalizedValue - lowerStop.value) / colorRange;
+  const range = upperStop.value - lowerStop.value;
+  const t = range === 0 ? 0 : (normalizedValue - lowerStop.value) / range;
 
   const r = Math.round(lowerStop.color[0] + (upperStop.color[0] - lowerStop.color[0]) * t);
   const g = Math.round(lowerStop.color[1] + (upperStop.color[1] - lowerStop.color[1]) * t);
   const b = Math.round(lowerStop.color[2] + (upperStop.color[2] - lowerStop.color[2]) * t);
 
-  // Validate color values to prevent NaN
-  const validR = isNaN(r) ? 107 : Math.max(0, Math.min(255, r));
-  const validG = isNaN(g) ? 114 : Math.max(0, Math.min(255, g));
-  const validB = isNaN(b) ? 128 : Math.max(0, Math.min(255, b));
-  const validOpacity = isNaN(opacity) ? 0.2 : Math.max(0, Math.min(1, opacity));
-
-  if (isNaN(r) || isNaN(g) || isNaN(b)) {
-    console.warn(`[Choropleth] NaN color values detected: r=${r}, g=${g}, b=${b}, count=${count}, normalizedValue=${normalizedValue}, scale=${JSON.stringify(scale)}`);
-  }
-
-  return `rgba(${validR}, ${validG}, ${validB}, ${validOpacity})`;
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
 /**
@@ -123,9 +112,20 @@ export function createChoroplethExpression(
   
   neighborhoods.forEach(({ regionId, count }) => {
     const color = getChoroplethColor(count, scale, opacity);
-    // Add condition and result as separate elements
-    cases.push(['==', ['get', regionIdField], regionId]);
-    cases.push(color);
+    
+    // Validate color to prevent NaN values from reaching MapLibre
+    if (color.includes('NaN')) {
+      console.warn(`[Choropleth] Invalid color generated for region ${regionId} with count ${count}:`, color);
+      console.warn(`[Choropleth] Scale:`, scale);
+      // Use default color instead
+      const validColor = `rgba(107, 114, 128, ${opacity})`;
+      cases.push(['==', ['get', regionIdField], regionId]);
+      cases.push(validColor);
+    } else {
+      // Add condition and result as separate elements
+      cases.push(['==', ['get', regionIdField], regionId]);
+      cases.push(color);
+    }
   });
 
   return [

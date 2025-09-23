@@ -284,6 +284,40 @@ export function getCityRegions(cityId: CityId): NeighborhoodMeta[] {
 }
 
 /**
+ * Get a specific neighborhood feature by region ID
+ */
+export function getNeighborhoodFeature(cityId: CityId, regionId: string): GeoJSON.Feature | null {
+  if (!isInitialized) {
+    console.log('Spatial index not initialized, initializing now...');
+    initializeSpatialIndex();
+  }
+
+  // Load the GeoJSON file to get the actual feature geometry
+  const config = SPATIAL_CONFIG.geojsonFiles[cityId];
+  if (!config) {
+    return null;
+  }
+
+  try {
+    const geojson = loadGeoJSON(config.path);
+    const features = geojson.features as NeighborhoodFeature[];
+    
+    // Find the feature with matching region ID
+    for (const feature of features) {
+      const { regionId: featureRegionId } = extractRegionInfo(feature, config);
+      if (featureRegionId === regionId) {
+        return feature;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`Failed to load neighborhood feature for ${cityId}:${regionId}`, error);
+    return null;
+  }
+}
+
+/**
  * Get spatial index statistics
  */
 export function getSpatialIndexStats(): SpatialIndexStats {
