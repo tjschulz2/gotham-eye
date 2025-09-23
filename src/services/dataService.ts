@@ -45,7 +45,7 @@ async function apiCall<T>(
   queryParams: NormalizedQueryParams, 
   options: { cache?: boolean; ttl?: number } = {}
 ): Promise<T> {
-  const { cache: useCache = true, ttl = 300000 } = options;
+  const { cache: useCache = false, ttl = 300000 } = options; // DISABLED CACHE FOR DEBUGGING
   
   const builder = new QueryParamsBuilder()
     .city(queryParams.city)
@@ -77,7 +77,9 @@ async function apiCall<T>(
 
   // Build URL with search params
   const searchParams = builder.toSearchParams();
-  const url = `${endpoint}?${searchParams}`;
+  // Add cache-busting parameter for debugging
+  const cacheBuster = `_cb=${Date.now()}`;
+  const url = `${endpoint}?${searchParams}&${cacheBuster}`;
   
   // Create and store the request promise
   const requestPromise = (async () => {

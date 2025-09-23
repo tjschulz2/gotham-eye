@@ -146,8 +146,11 @@ async function queryTotalEvents(params: NormalizedQueryParams, spatialFilter: st
   const whereClause = buildWhereClause(params);
   const query = `SELECT count() as total FROM public.crime_events PREWHERE ${whereClause}${spatialFilter}`;
   
+  console.log(`[Stats API] Total Events Query: ${query}`);
   const results = await executeQuery(query, 10000); // 10s timeout for count queries
-  return Number(results[0]?.total) || 0;
+  const total = Number(results[0]?.total) || 0;
+  console.log(`[Stats API] Total Events Result: ${total}`);
+  return total;
 }
 
 // Query time series data (monthly) with PREWHERE optimization
@@ -205,6 +208,7 @@ async function queryLawClassBreakdown(params: NormalizedQueryParams, spatialFilt
 
 // Query location breakdown with optimized JSON extraction
 async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilter: string = ''): Promise<Array<{ location: string; locationType: 'borough' | 'precinct' | 'district' | 'neighborhood' | 'premise'; count: number }>> {
+  console.log(`[Stats API] 🚨 queryLocationBreakdown called for city: ${params.city}`);
   const whereClause = buildWhereClause(params);
   
   if (params.city === 'nyc') {
@@ -230,41 +234,110 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
       count: Number(r.count) || 0 
     }));
   } else {
-    // For SF, use optimized spatial aggregation
+    // First, check how many incidents have valid coordinates vs total
+    const totalQuery = `SELECT count() as total FROM public.crime_events PREWHERE ${whereClause}${spatialFilter}`;
+    const totalWithCoordsQuery = `SELECT count() as total FROM public.crime_events PREWHERE ${whereClause}${spatialFilter} AND lat IS NOT NULL AND lon IS NOT NULL AND lat != 0 AND lon != 0`;
+    
+    const [totalResult, totalWithCoordsResult] = await Promise.all([
+      executeQuery(totalQuery, 10000),
+      executeQuery(totalWithCoordsQuery, 10000)
+    ]);
+    
+    const totalIncidents = Number(totalResult[0]?.total) || 0;
+    const totalWithCoords = Number(totalWithCoordsResult[0]?.total) || 0;
+    const missingCoords = totalIncidents - totalWithCoords;
+    
+    console.log(`[Stats API] SF Coordinate Analysis: Total=${totalIncidents}, WithCoords=${totalWithCoords}, MissingCoords=${missingCoords}`);
+    
+    // For SF, use improved spatial aggregation with better H3 resolution
     const query = `
       SELECT 
-        round(lat, 3) as lat_rounded, 
-        round(lon, 3) as lon_rounded, 
+        lat, 
+        lon, 
         count() as count
       FROM public.crime_events 
-      PREWHERE ${whereClause}${spatialFilter}
-      GROUP BY lat_rounded, lon_rounded
+      PREWHERE ${whereClause}${spatialFilter} AND lat IS NOT NULL AND lon IS NOT NULL AND lat != 0 AND lon != 0
+      GROUP BY lat, lon
       HAVING count > 0
       ORDER BY count DESC
-      LIMIT 100
     `;
     
-    const results = await executeQuery(query, 12000);
+    console.log(`[Stats API] SF Location Query: ${query}`);
+    const results = await executeQuery(query, 25000); // Increased timeout for larger dataset
+    console.log(`[Stats API] SF Location Query returned ${results.length} coordinate groups`);
+    
+    // Calculate total incidents from coordinate groups
+    const totalFromCoords = results.reduce((sum, r) => sum + (Number(r.count) || 0), 0);
+    console.log(`[Stats API] Total incidents from coordinate groups: ${totalFromCoords}`);
     
     // Initialize spatial index if needed
     initializeSpatialIndex();
     
-    // Map coordinates to neighborhoods and aggregate
+    // Map coordinates to neighborhoods and aggregate with improved logic
     const neighborhoodCounts = new Map<string, number>();
+    let processedCount = 0;
+    let unmappedCount = 0;
+    let sampleUnmapped: Array<{lat: number, lon: number, count: number}> = [];
     
+    // Removed TEST_CATEGORY as requested
+    
+    // Process ALL coordinate groups, not just a subset
     for (const result of results) {
-      const lookup = lookupPoint(params.city, result.lat_rounded, result.lon_rounded);
-      if (lookup.regionId) {
-        const current = neighborhoodCounts.get(lookup.regionId) || 0;
-        neighborhoodCounts.set(lookup.regionId, current + (Number(result.count) || 0));
+      const count = Number(result.count) || 0;
+      const lookup = lookupPoint(params.city, result.lat, result.lon);
+      
+      if (lookup.regionId && lookup.regionName) {
+        const current = neighborhoodCounts.get(lookup.regionName) || 0;
+        neighborhoodCounts.set(lookup.regionName, current + count);
+        processedCount += count;
+      } else {
+        unmappedCount += count;
+        if (sampleUnmapped.length < 20) {
+          sampleUnmapped.push({lat: result.lat, lon: result.lon, count});
+        }
       }
     }
     
+    console.log(`[Stats API] SF Location Breakdown: Processed ${processedCount} incidents, ${unmappedCount} unmapped incidents across ${neighborhoodCounts.size} neighborhoods`);
+    console.log(`[Stats API] Sample unmapped coordinates (first 20):`, sampleUnmapped);
+    
+    // Add unmapped incidents (coordinates that don't map to neighborhoods)
+    if (unmappedCount > 0) {
+      neighborhoodCounts.set('Unknown/Outside SF', unmappedCount);
+      console.log(`[Stats API] Added ${unmappedCount} unmapped incidents as 'Unknown/Outside SF'`);
+    }
+    
+    // Add incidents without coordinates
+    if (missingCoords > 0) {
+      neighborhoodCounts.set('No Location Data', missingCoords);
+      console.log(`[Stats API] Added ${missingCoords} incidents without coordinates as 'No Location Data'`);
+    }
+    
+    // Log top neighborhoods
+    const sortedNeighborhoods = Array.from(neighborhoodCounts.entries())
+      .map(([location, count]) => ({ location, count }))
+      .sort((a, b) => b.count - a.count);
+    
+    console.log(`[Stats API] Top 15 neighborhoods from spatial lookup:`, sortedNeighborhoods.slice(0, 15));
+    
+    const totalMapped = sortedNeighborhoods.reduce((sum, n) => sum + n.count, 0);
+    console.log(`[Stats API] Total mapped to neighborhoods: ${totalMapped}`);
+    console.log(`[Stats API] Mapping efficiency: ${((processedCount / totalFromCoords) * 100).toFixed(1)}%`);
+    console.log(`[Stats API] Total with unmapped: ${totalMapped} (${((totalMapped / totalFromCoords) * 100).toFixed(1)}%)`);
+    
+    // Removed Other/Unmapped category as requested
+    // Note: This may cause totals to not match exactly, but provides cleaner location data
+    
     // Convert to array and sort
-    return Array.from(neighborhoodCounts.entries())
-      .map(([location, count]) => ({ location, locationType: 'neighborhood' as const, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 20);
+    const finalNeighborhoods = Array.from(neighborhoodCounts.entries())
+      .map(([location, count]) => ({ location, count }))
+      .sort((a, b) => b.count - a.count);
+    
+    const finalTotal = finalNeighborhoods.reduce((sum, n) => sum + n.count, 0);
+    console.log(`[Stats API] FINAL TOTAL: ${finalTotal}`);
+    
+    return finalNeighborhoods
+      .map(({location, count}) => ({ location, locationType: 'neighborhood' as const, count }));
   }
 }
 
@@ -584,6 +657,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const params = validateAndNormalizeParams(searchParams);
     
+    console.log(`[Stats API] 🚨 GET REQUEST for city: ${params.city}, URL: ${request.url}`);
+    
     console.log(`[Stats API] 🚨 RECEIVED PARAMS:`, {
       city: params.city,
       showNoResults: params.showNoResults,
@@ -598,22 +673,11 @@ export async function GET(request: NextRequest) {
     console.log(`[Stats API] Selected neighborhood: ${params.selectedNeighborhood}`);
     console.log(`[Stats API] Filters - Offenses: [${params.offenses.join(', ')}], Law Classes: [${params.lawClass.join(', ')}]`);
     
-    // Disable cache for neighborhood requests temporarily for debugging
-    if (!params.selectedNeighborhood) {
-      // Check cache only for city-wide requests
-      const cached = cache.get(cacheKey);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`[Stats API] Cache hit for key: ${cacheKey}, returning cached data with ${cached.data.totals?.events || 0} events`);
-        return NextResponse.json(cached.data, {
-          headers: {
-            'Cache-Control': 'public, max-age=300',
-            'X-Cache': 'HIT'
-          }
-        });
-      }
-    } else {
-      console.log(`[Stats API] Skipping cache for neighborhood request: ${params.selectedNeighborhood}`);
-    }
+    // TEMPORARILY DISABLE ALL CACHE FOR DEBUGGING
+    console.log(`[Stats API] 🚨 CACHE DISABLED FOR DEBUGGING - forcing fresh data`);
+    // Clear any existing cache entries
+    cache.clear();
+    console.log(`[Stats API] Cleared all cache entries`);
     
     console.log(`[Stats API] Cache miss for key: ${cacheKey}, fetching new data`);
 

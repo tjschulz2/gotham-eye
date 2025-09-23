@@ -22,7 +22,7 @@ import type {
 
 // Configuration for spatial indexing
 const SPATIAL_CONFIG: SpatialConfig = {
-  h3Resolution: 9, // Good balance of accuracy vs performance
+  h3Resolution: 11, // Even higher resolution for maximum accuracy (was 10)
   geojsonFiles: {
     nyc: {
       path: 'public/nyc_nta_2020.geojson',

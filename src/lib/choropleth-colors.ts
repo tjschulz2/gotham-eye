@@ -13,18 +13,43 @@ export function getChoroplethColor(
     return `rgba(107, 114, 128, ${opacity})`; // Gray for no data
   }
 
+  // Handle edge cases where scale values might be the same (very sparse data)
+  const range = scale.max - scale.min;
+  if (range === 0 || scale.min === scale.max) {
+    // All values are the same - use a middle color
+    console.log(`[Choropleth] Uniform data detected: count=${count}, scale=${JSON.stringify(scale)}`);
+    return `rgba(124, 255, 102, ${opacity})`; // Light green for uniform data
+  }
+
   // Normalize the count to a 0-1 scale using percentiles
   let normalizedValue: number;
   
+  // Check for division by zero scenarios and handle gracefully
+  const p50Range = scale.p50 - scale.min;
+  const p90Range = scale.p90 - scale.p50;
+  const maxRange = scale.max - scale.p90;
+  
   if (count <= scale.p50) {
     // Low crime: 0 to 0.5 (blue to light blue)
-    normalizedValue = (count - scale.min) / (scale.p50 - scale.min) * 0.5;
+    if (p50Range === 0) {
+      normalizedValue = 0.25; // Default to low-medium if no range
+    } else {
+      normalizedValue = (count - scale.min) / p50Range * 0.5;
+    }
   } else if (count <= scale.p90) {
     // Medium crime: 0.5 to 0.8 (light blue to orange)
-    normalizedValue = 0.5 + (count - scale.p50) / (scale.p90 - scale.p50) * 0.3;
+    if (p90Range === 0) {
+      normalizedValue = 0.65; // Default to medium-high if no range
+    } else {
+      normalizedValue = 0.5 + (count - scale.p50) / p90Range * 0.3;
+    }
   } else {
     // High crime: 0.8 to 1.0 (orange to red)
-    normalizedValue = 0.8 + (count - scale.p90) / (scale.max - scale.p90) * 0.2;
+    if (maxRange === 0) {
+      normalizedValue = 0.9; // Default to high if no range
+    } else {
+      normalizedValue = 0.8 + (count - scale.p90) / maxRange * 0.2;
+    }
   }
 
   // Clamp to 0-1 range
@@ -55,14 +80,24 @@ export function getChoroplethColor(
   }
 
   // Interpolate between the two stops
-  const range = upperStop.value - lowerStop.value;
-  const t = range === 0 ? 0 : (normalizedValue - lowerStop.value) / range;
+  const colorRange = upperStop.value - lowerStop.value;
+  const t = colorRange === 0 ? 0 : (normalizedValue - lowerStop.value) / colorRange;
 
   const r = Math.round(lowerStop.color[0] + (upperStop.color[0] - lowerStop.color[0]) * t);
   const g = Math.round(lowerStop.color[1] + (upperStop.color[1] - lowerStop.color[1]) * t);
   const b = Math.round(lowerStop.color[2] + (upperStop.color[2] - lowerStop.color[2]) * t);
 
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  // Validate color values to prevent NaN
+  const validR = isNaN(r) ? 107 : Math.max(0, Math.min(255, r));
+  const validG = isNaN(g) ? 114 : Math.max(0, Math.min(255, g));
+  const validB = isNaN(b) ? 128 : Math.max(0, Math.min(255, b));
+  const validOpacity = isNaN(opacity) ? 0.2 : Math.max(0, Math.min(1, opacity));
+
+  if (isNaN(r) || isNaN(g) || isNaN(b)) {
+    console.warn(`[Choropleth] NaN color values detected: r=${r}, g=${g}, b=${b}, count=${count}, normalizedValue=${normalizedValue}, scale=${JSON.stringify(scale)}`);
+  }
+
+  return `rgba(${validR}, ${validG}, ${validB}, ${validOpacity})`;
 }
 
 /**

@@ -53,6 +53,30 @@ function computeScale(counts: number[]): { min: number; max: number; p50: number
   const sorted = [...counts].sort((a, b) => a - b);
   const len = sorted.length;
 
+  // For very small datasets, ensure we have meaningful percentiles
+  if (len === 1) {
+    const value = sorted[0];
+    return {
+      min: value,
+      max: value,
+      p50: value,
+      p90: value,
+      p99: value
+    };
+  }
+
+  // For small datasets (2-5 items), spread the percentiles more evenly
+  if (len <= 5) {
+    return {
+      min: sorted[0],
+      max: sorted[len - 1],
+      p50: sorted[Math.floor(len / 2)],
+      p90: sorted[Math.max(1, len - 2)], // Second highest or higher
+      p99: sorted[len - 1]
+    };
+  }
+
+  // Standard percentile calculation for larger datasets
   return {
     min: sorted[0],
     max: sorted[len - 1],
