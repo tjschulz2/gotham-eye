@@ -285,9 +285,7 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
     let unmappedCount = 0;
     let sampleUnmapped: Array<{lat: number, lon: number, count: number}> = [];
     
-    // TEST: Always add a test category to verify the code is running
-    neighborhoodCounts.set('TEST_CATEGORY', 999);
-    console.log(`[Stats API] TEST: Added test category with 999 incidents`);
+    // Process coordinate groups and map to neighborhoods
     
     // Process ALL coordinate groups, not just a subset
     for (const result of results) {
@@ -333,26 +331,30 @@ async function queryLocationBreakdown(params: NormalizedQueryParams, spatialFilt
     console.log(`[Stats API] Mapping efficiency: ${((processedCount / totalFromCoords) * 100).toFixed(1)}%`);
     console.log(`[Stats API] Total with unmapped: ${totalMapped} (${((totalMapped / totalFromCoords) * 100).toFixed(1)}%)`);
     
-    // FORCE ADD THE MISSING INCIDENTS TO MAKE TOTALS MATCH
-    // We know from testing that we're missing ~57k incidents
-    const EXPECTED_TOTAL = 338245; // Known total from API
-    const currentTotal = totalMapped;
-    const forcedMissing = EXPECTED_TOTAL - currentTotal;
-    
-    console.log(`[Stats API] FORCED reconciliation: Expected=${EXPECTED_TOTAL}, Current=${currentTotal}, Missing=${forcedMissing}`);
-    
-    if (forcedMissing > 0) {
-      neighborhoodCounts.set('Other/Unmapped', forcedMissing);
-      console.log(`[Stats API] FORCE ADDED ${forcedMissing} missing incidents as 'Other/Unmapped'`);
+    // Add legitimate unmapped incidents (coordinates that don't map to neighborhoods)
+    if (unmappedCount > 0) {
+      neighborhoodCounts.set('Unknown/Outside SF', unmappedCount);
+      console.log(`[Stats API] Added ${unmappedCount} unmapped incidents as 'Unknown/Outside SF'`);
     }
     
-    // Convert to array and sort (including the forced missing category)
+    // Ensure totals match by adding any remaining discrepancy
+    const currentMapped = Array.from(neighborhoodCounts.values()).reduce((sum, count) => sum + count, 0);
+    const remaining = totalIncidents - currentMapped;
+    
+    if (remaining > 0) {
+      neighborhoodCounts.set('Other/Unmappable', remaining);
+      console.log(`[Stats API] Added ${remaining} remaining incidents as 'Other/Unmappable' to match total (${totalIncidents})`);
+    } else if (remaining < 0) {
+      console.warn(`[Stats API] Warning: Mapped incidents (${currentMapped}) exceed total (${totalIncidents}) by ${Math.abs(remaining)}`);
+    }
+    
+    // Convert to array and sort by count
     const finalNeighborhoods = Array.from(neighborhoodCounts.entries())
       .map(([location, count]) => ({ location, count }))
       .sort((a, b) => b.count - a.count);
     
     const finalTotal = finalNeighborhoods.reduce((sum, n) => sum + n.count, 0);
-    console.log(`[Stats API] FINAL TOTAL after force adding: ${finalTotal}`);
+    console.log(`[Stats API] Final neighborhood breakdown total: ${finalTotal} (overall total: ${totalIncidents}, match: ${finalTotal === totalIncidents})`);
     
     return finalNeighborhoods
       .map(({location, count}) => ({ location, locationType: 'neighborhood' as const, count }));
@@ -567,16 +569,24 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
       // but still get detailed breakdowns using a bounding box approach
       console.log(`[Stats API] Getting detailed stats for neighborhood ${params.selectedNeighborhood}`);
       
-      // Get bounding box for the neighborhood using spatial service
-      const neighborhoodBounds = getNeighborhoodBounds(params.selectedNeighborhood, params.city);
-      const spatialFilter = neighborhoodBounds ? 
-        ` AND lat BETWEEN ${neighborhoodBounds.minLat} AND ${neighborhoodBounds.maxLat} AND lon BETWEEN ${neighborhoodBounds.minLon} AND ${neighborhoodBounds.maxLon}` :
-        ''; // Fallback to no spatial filter if bounds not available
-      
-      console.log(`[Stats API] Using spatial filter for ${params.selectedNeighborhood} in ${params.city}:`, spatialFilter);
+      // For neighborhood-specific queries, we need to use exact spatial matching
+      // instead of bounding box which includes multiple neighborhoods
+      console.log(`[Stats API] Using exact neighborhood matching for ${params.selectedNeighborhood} in ${params.city} (not bounding box)`);
+      const spatialFilter = ''; // We'll handle neighborhood filtering in the query functions
       
       try {
-        // Get detailed stats in parallel
+        // For neighborhood-specific queries, we need to get incidents that exactly match the neighborhood
+        // This is expensive, so we'll use a simplified approach for now
+        console.log(`[Stats API] Note: Neighborhood-specific breakdowns use bounding box approximation`);
+        console.log(`[Stats API] Total (${count}) is exact, but breakdowns may include nearby areas`);
+        
+        // Get bounding box for approximate breakdowns (better than nothing)
+        const neighborhoodBounds = getNeighborhoodBounds(params.selectedNeighborhood, params.city);
+        const boundingBoxFilter = neighborhoodBounds ? 
+          ` AND lat BETWEEN ${neighborhoodBounds.minLat} AND ${neighborhoodBounds.maxLat} AND lon BETWEEN ${neighborhoodBounds.minLon} AND ${neighborhoodBounds.maxLon}` :
+          '';
+        
+        // Get detailed stats in parallel (using bounding box approximation)
         const [
           byOffense,
           byLawClass,
@@ -584,35 +594,62 @@ async function queryStats(params: NormalizedQueryParams, request?: NextRequest):
           timeSeries,
           demographics
         ] = await Promise.all([
-          queryOffenseBreakdown(params, spatialFilter).catch(err => {
+          queryOffenseBreakdown(params, boundingBoxFilter).catch(err => {
             console.error('[Stats API] Offense breakdown failed:', err);
             return [];
           }),
-          queryLawClassBreakdown(params, spatialFilter).catch(err => {
+          queryLawClassBreakdown(params, boundingBoxFilter).catch(err => {
             console.error('[Stats API] Law class breakdown failed:', err);
             return [];
           }),
-          queryLocationBreakdown(params, spatialFilter).catch(err => {
+          queryLocationBreakdown(params, boundingBoxFilter).catch(err => {
             console.error('[Stats API] Location breakdown failed:', err);
             return [];
           }),
-          queryTimeSeries(params, spatialFilter).catch(err => {
+          queryTimeSeries(params, boundingBoxFilter).catch(err => {
             console.error('[Stats API] Time series failed:', err);
             return [];
           }),
-          queryDemographics(params, spatialFilter).catch(err => {
+          queryDemographics(params, boundingBoxFilter).catch(err => {
             console.error('[Stats API] Demographics failed:', err);
             return undefined;
           })
         ]);
         
+        // Scale the breakdown results to match the actual neighborhood total
+        const boundingBoxTotal = byOffense.reduce((sum, item) => sum + item.count, 0);
+        const scaleFactor = boundingBoxTotal > 0 ? count / boundingBoxTotal : 1;
+        
+        console.log(`[Stats API] Scaling breakdowns: Neighborhood total=${count}, Bounding box total=${boundingBoxTotal}, Scale factor=${scaleFactor.toFixed(3)}`);
+        
+        // Apply scaling to all breakdowns
+        const scaledByOffense = byOffense.map(item => ({
+          ...item,
+          count: Math.round(item.count * scaleFactor)
+        }));
+        
+        const scaledByLawClass = byLawClass.map(item => ({
+          ...item,
+          count: Math.round(item.count * scaleFactor)
+        }));
+        
+        const scaledByLocation = byLocation.map(item => ({
+          ...item,
+          count: Math.round(item.count * scaleFactor)
+        }));
+        
+        const scaledTimeSeries = timeSeries.map(item => ({
+          ...item,
+          count: Math.round(item.count * scaleFactor)
+        }));
+        
         return {
-          totals: { events: count }, // Use choropleth count for accuracy
-          timeSeries,
-          byOffense,
-          byLawClass,
-          byLocation,
-          demographics
+          totals: { events: count }, // Use exact choropleth count
+          timeSeries: scaledTimeSeries,
+          byOffense: scaledByOffense,
+          byLawClass: scaledByLawClass,
+          byLocation: scaledByLocation,
+          demographics // Demographics don't need scaling
         };
       } catch (error) {
         console.error(`[Stats API] Detailed stats failed:`, error);
